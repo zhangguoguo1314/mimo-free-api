@@ -25,7 +25,7 @@ MiMo Free API 是一个高性能反向代理网关，将小米 MiMo AI 网页端
 
 - MiMo 网页端免费但没有提供 API
 - MiMo 官方 API（Token Plan）有调用限制
-- 本项目让你用网页端的免费额度，通过标准 API 格式接入任何工具
+- 本项目可以让你用网页端的免费额度，通过标准 API 格式接入任何工具，包括但不限于 Hermes Agent、OpenClaw、Claude Code、Codex、OpenCode、GitHub Copilot、Trae、Qoder、WorkBuddy、MiClaw、酒馆等
 
 ### 特性
 
@@ -249,7 +249,13 @@ curl http://localhost:8080/v1/messages \
 
 ### 截图
 
-> 欢迎补充截图
+**仪表盘** — 实时统计 Token 用量、请求量、模型分布
+
+![Dashboard](assets/dashboard.png)
+
+**配置管理** — API 设置、模型切换、账号池管理
+
+![Config](assets/config.png)
 
 ### 技术栈
 
@@ -329,7 +335,7 @@ MiMo Free API is a high-performance reverse proxy gateway that converts Xiaomi M
 
 - MiMo web UI is free but doesn't provide an API
 - MiMo official API (Token Plan) has usage limits
-- This project lets you use the web UI's free quota through standard API formats
+- This project lets you use the web UI's free quota through standard API formats, compatible with tools including but not limited to Hermes Agent, OpenClaw, Claude Code, Codex, OpenCode, GitHub Copilot, Trae, Qoder, WorkBuddy, MiClaw, SillyTavern, and more
 
 ### Features
 
