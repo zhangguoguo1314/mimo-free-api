@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "MiMo Gateway Helper",
+  "version": "1.0.0",
+  "description": "一键将 MiMo 登录态同步到 MiMo Gateway",
+  "permissions": [
+    "cookies"
+  ],
+  "host_permissions": [
+    "https://*.xiaomimimo.com/*",
+    "https://*.xiaomi.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  }
+}
