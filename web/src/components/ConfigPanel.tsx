@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Key, Cpu, Save, Eye, EyeOff, Check, Loader2, Users, Plus, Trash2 } from 'lucide-react'
 import { useSettings } from '../contexts/SettingsContext'
+import { apiFetch } from '../lib/api'
 
 interface Account {
   id: string
@@ -32,7 +33,7 @@ export function ConfigPanel() {
   const [adding, setAdding] = useState(false)
 
   const loadConfig = () => {
-    fetch('/admin/api/config')
+    apiFetch('/admin/api/config')
       .then(r => r.json())
       .then(cfg => {
         setApiKey(cfg.api_key || '')
@@ -48,7 +49,7 @@ export function ConfigPanel() {
   const handleSave = async () => {
     setSaving(true)
     try {
-      await fetch('/admin/api/config', {
+      await apiFetch('/admin/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ default_model: defaultModel })
@@ -64,7 +65,7 @@ export function ConfigPanel() {
     if (!newId.trim() || !newToken.trim()) return
     setAdding(true)
     try {
-      const res = await fetch('/admin/api/accounts', {
+      const res = await apiFetch('/admin/api/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -87,8 +88,8 @@ export function ConfigPanel() {
 
   const handleDelete = async (id: string) => {
     if (!confirm(lang === 'zh' ? `确认删除账号 "${id}"？` : `Delete account "${id}"?`)) return
-    const res = await fetch('/admin/api/accounts', {
-      method: 'DELETE',
+    const res = await apiFetch('/admin/api/accounts', {
+        method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id })
     })

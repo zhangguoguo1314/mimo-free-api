@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Activity, Zap, Cpu, Hash, BarChart3, Clock, List, Download, ChevronLeft, ChevronRight } from 'lucide-react'
 import { ComposedChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Line, CartesianGrid } from 'recharts'
 import { useSettings } from '../contexts/SettingsContext'
+import { apiFetch } from '../lib/api'
 
 interface UsageRecord {
   timestamp: string
@@ -93,7 +94,7 @@ export function Dashboard() {
 
   const fetchStats = async () => {
     try {
-      const resp = await fetch('/admin/api/stats')
+      const resp = await apiFetch('/admin/api/stats')
       if (resp.ok) setStats(await resp.json())
     } catch (e) { console.error(e) }
     finally { setLoading(false) }
