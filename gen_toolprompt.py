@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Patch toolprompt.go template string.
 Replaces TEMPLATE_PLACEHOLDER with properly escaped Go string.
-Backticks are handled via string concatenation.
+Key: the template uses actual \\n (backslash+n) between lines so Go
+interprets them as newlines at runtime. We must NOT double-escape.
 """
 import os
 
@@ -76,31 +77,42 @@ lines = [
     'Remember: The ONLY valid way to use tools is the <' + PIPE + 'DSML' + PIPE + 'tool_calls>...</' + PIPE + 'DSML' + PIPE + 'tool_calls> block at the end of your response.',
 ]
 
-# Build Go string literal
-# Split on backtick to handle Go raw string limitation
-full_text = "\\n".join(lines)
+# Join with actual newline characters
+full_text = "\n".join(lines)
 
-# Escape for Go regular string
-# Split on backtick since Go strings can't contain literal backtick
-parts = full_text.split('`')
+# Escape for Go double-quoted string:
+# - backslash -> \\  (Go needs \\ for literal backslash)
+# - double-quote -> \"
+# - actual newline -> \\n  (Go escape sequence for newline)
+# BUT: the fullwidth pipe character ｜ (U+FF5C) is fine in Go strings
+def escape_for_go(s):
+    result = []
+    for ch in s:
+        if ch == '\\':
+            result.append('\\\\')
+        elif ch == '"':
+            result.append('\\"')
+        elif ch == '\n':
+            result.append('\\n')
+        else:
+            result.append(ch)
+    return ''.join(result)
 
-# Build Go expression: "part1" + "`" + "part2" + "`" + "part3"
-go_parts = []
-for i, part in enumerate(parts):
-    go_parts.append('"' + part.replace('\\', '\\\\').replace('"', '\\"') + '"')
-    if i < len(parts) - 1:
-        go_parts.append('"`"')
-
-go_expr = " + ".join(go_parts)
+# Split on backtick since Go double-quoted strings can't contain literal backtick
+# Actually, Go strings CAN contain backtick. Only raw strings (backtick-delimited) can't.
+# Since we're using double-quoted strings, backtick is fine.
+escaped = escape_for_go(full_text)
 
 # Read and patch Go file
 go_path = os.path.join('internal', 'toolcall', 'toolprompt.go')
 with open(go_path, 'r', encoding='utf-8') as f:
     go_code = f.read()
 
-go_code = go_code.replace('`TEMPLATE_PLACEHOLDER`', go_expr)
+old_marker = 'TEMPLATE_PLACEHOLDER'
+# Replace the backtick-delimited placeholder with a double-quoted Go string
+go_code = go_code.replace('`' + old_marker + '`', '"' + escaped + '"')
 
 with open(go_path, 'w', encoding='utf-8') as f:
     f.write(go_code)
 
-print(f"Patched {go_path} ({len(full_text)} chars template)")
+print(f"Patched {go_path} ({len(full_text)} chars, {len(lines)} lines)")
