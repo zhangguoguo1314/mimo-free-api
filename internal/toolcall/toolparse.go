@@ -372,6 +372,75 @@ func appendVal(input map[string]any, key string, val any) {
 
 // ===== Public API =====
 
+// parseToolCall handles the <tool_call><function=X>...</function></tool_call> format
+// where the model wraps function calls in a tool_call container.
+func parseToolCall(text string) []ParsedToolCall {
+	// Look for <tool_call>...</tool_call> blocks
+	tcRe := regexp.MustCompile(`(?is)<tool_call>([\s\S]*?)</tool_call>`)
+	matches := tcRe.FindAllStringSubmatch(text, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	var allCalls []ParsedToolCall
+	for _, m := range matches {
+		// Inside the tool_call block, parse function=X tags using existing parser
+		inner := m[1]
+		calls := parseFuncXML(inner)
+		if len(calls) == 0 {
+			// Also try plain <tool_calls>...</tool_calls> inside
+			calls = parseToolCallsXML(inner)
+		}
+		allCalls = append(allCalls, calls...)
+	}
+	if len(allCalls) > 0 {
+		return allCalls
+	}
+	return nil
+}
+
+// parsePercentToolCalls handles MiMo Code native format: % ToolName args
+func parsePercentToolCalls(text string) []ParsedToolCall {
+	lines := strings.Split(text, "\n")
+	var calls []ParsedToolCall
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "%") {
+			continue
+		}
+		// % ToolName arg1 arg2 ...
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+		toolName := parts[1]
+		// Skip internal MiMo Code tools that aren't in our tool list
+		if toolName == "Build" || toolName == "Plan" || toolName == "Search" {
+			continue
+		}
+		args := map[string]any{}
+		if len(parts) > 2 {
+			// First arg for webfetch/web_search is usually the URL/query
+			switch strings.ToLower(toolName) {
+			case "webfetch", "web_fetch":
+				args["url"] = parts[2]
+				if len(parts) > 3 {
+					args["format"] = parts[3]
+				}
+			case "web_search", "websearch":
+				args["query"] = strings.Join(parts[2:], " ")
+			default:
+				// For other tools, join remaining args as the main parameter
+				args["command"] = strings.Join(parts[2:], " ")
+			}
+		}
+		calls = append(calls, ParsedToolCall{Name: toolName, Input: args})
+	}
+	if len(calls) > 0 {
+		return calls
+	}
+	return nil
+}
+
 func ParseToolCallsFromText(text string) []ParsedToolCall {
 	if text == "" {
 		return nil
@@ -384,7 +453,15 @@ func ParseToolCallsFromText(text string) []ParsedToolCall {
 	if len(calls) > 0 {
 		return calls
 	}
-	return parseFuncXML(text)
+	calls = parseFuncXML(text)
+	if len(calls) > 0 {
+		return calls
+	}
+	calls = parseToolCall(text)
+	if len(calls) > 0 {
+		return calls
+	}
+	return parsePercentToolCalls(text)
 }
 
 func ConvertToolCallsToOpenAI(calls []ParsedToolCall) []adapter.OpenAIToolCall {
@@ -403,6 +480,8 @@ func ConvertToolCallsToOpenAI(calls []ParsedToolCall) []adapter.OpenAIToolCall {
 	return result
 }
 
+var percentToolRe = regexp.MustCompile(`(?m)^%\s+\w+\s+.*$`)
+
 func HasToolCallSyntax(text string) bool {
 	if text == "" {
 		return false
@@ -410,7 +489,9 @@ func HasToolCallSyntax(text string) bool {
 	lower := strings.ToLower(text)
 	return strings.Contains(lower, "tool_calls") ||
 		strings.Contains(lower, "dsml") ||
-		strings.Contains(lower, "function=")
+		strings.Contains(lower, "function=") ||
+		strings.Contains(lower, "tool_call") ||
+		percentToolRe.MatchString(text)
 }
 
 func StripToolCallSyntax(text string) string {
@@ -420,5 +501,9 @@ func StripToolCallSyntax(text string) string {
 	result := dsmlWrapperRe.ReplaceAllString(text, "")
 	result = regexp.MustCompile(`(?is)<tool_calls>[\s\S]*?</tool_calls>`).ReplaceAllString(result, "")
 	result = regexp.MustCompile(`(?is)<function=[^>]*>[\s\S]*?</function>`).ReplaceAllString(result, "")
+	// Strip <tool_call>...</tool_call> blocks
+	result = regexp.MustCompile(`(?is)<tool_call>[\s\S]*?</tool_call>`).ReplaceAllString(result, "")
+	// Strip MiMo Code native % ToolName args lines
+	result = percentToolRe.ReplaceAllString(result, "")
 	return strings.TrimSpace(result)
 }

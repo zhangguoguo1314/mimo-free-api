@@ -1,6 +1,9 @@
 package toolcall
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseStandardFuncCalls(t *testing.T) {
 	// Simulate what MiMo outputs
@@ -130,4 +133,92 @@ func TestParseFuncCallsBlock(t *testing.T) {
 		t.Errorf("expected path param, got %v", call.Input["path"])
 	}
 	t.Logf("function_calls block OK: name=%s input=%v", call.Name, call.Input)
+}
+
+func TestParsePercentToolCalls(t *testing.T) {
+	LT := "\x3c"
+	GT := "\x3e"
+	SL := "\x2f"
+
+	// Test pure percent format (no XML present)
+	purePercent := "% WebFetch https://example.com\n% WebFetch https://example.org"
+
+	calls := ParseToolCallsFromText(purePercent)
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 calls from percent format, got %d", len(calls))
+	}
+	if calls[0].Input["url"] != "https://example.com" {
+		t.Errorf("expected url=https://example.com, got %v", calls[0].Input["url"])
+	}
+	if calls[1].Input["url"] != "https://example.org" {
+		t.Errorf("expected url=https://example.org, got %v", calls[1].Input["url"])
+	}
+
+	// Test mixed: percent lines + DSML (DSML should take priority)
+	mixed := "% WebFetch https://example.com\n% WebFetch https://example.org\n" +
+		LT + "\uff5cDSML\uff5ctool_calls" + GT + "\n" +
+		"  " + LT + "\uff5cDSML\uff5cinvoke name=\"webfetch\"" + GT + "\n" +
+		"    " + LT + "\uff5cDSML\uff5cparameter name=\"url\"" + GT + "<![CDATA[https://real.com]]>" + LT + SL + "\uff5cDSML\uff5cparameter" + GT + "\n" +
+		"  " + LT + SL + "\uff5cDSML\uff5cinvoke" + GT + "\n" +
+		LT + SL + "\uff5cDSML\uff5ctool_calls" + GT
+
+	calls = ParseToolCallsFromText(mixed)
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 call (DSML takes priority), got %d", len(calls))
+	}
+	if calls[0].Name != "webfetch" {
+		t.Errorf("expected webfetch, got %s", calls[0].Name)
+	}
+	if calls[0].Input["url"] != "https://real.com" {
+		t.Errorf("expected url=https://real.com, got %v", calls[0].Input["url"])
+	}
+
+	// Test StripToolCallSyntax removes percent lines
+	stripped := StripToolCallSyntax(purePercent)
+	if strings.Contains(stripped, "%") {
+		t.Errorf("StripToolCallSyntax should remove percent lines, got: %s", stripped)
+	}
+
+	// Test HasToolCallSyntax detects percent format
+	if !HasToolCallSyntax(purePercent) {
+		t.Error("HasToolCallSyntax should detect percent format")
+	}
+
+	t.Logf("percent format OK: %d calls parsed, stripped=%q", len(calls), stripped)
+}
+
+func TestParseNestedToolCalls(t *testing.T) {
+	// Model outputs nested format: <tool_call> containing <function=X>
+	LT := "\x3c"
+	GT := "\x3e"
+	F := "function"
+	P := "parameter"
+	SL := "\x2f"
+
+	input := LT + "tool_call" + GT + "\n" +
+		LT + F + "=webfetch" + GT + "\n" +
+		LT + P + " name=\"url\"" + GT + "https://www.bing.com/search?q=claude+fable+5" + LT + SL + P + GT + "\n" +
+		LT + P + " name=\"format\"" + GT + "markdown" + LT + SL + P + GT + "\n" +
+		LT + SL + F + GT + "\n" +
+		LT + SL + "tool_call" + GT
+
+	t.Logf("Input: %q", input)
+
+	calls := ParseToolCallsFromText(input)
+	if len(calls) == 0 {
+		t.Fatal("ParseToolCallsFromText returned no calls for nested format")
+	}
+
+	call := calls[0]
+	if call.Name != "webfetch" {
+		t.Errorf("expected webfetch, got %s", call.Name)
+	}
+	if call.Input["url"] != "https://www.bing.com/search?q=claude+fable+5" {
+		t.Errorf("expected url, got %v", call.Input["url"])
+	}
+	if call.Input["format"] != "markdown" {
+		t.Errorf("expected format=markdown, got %v", call.Input["format"])
+	}
+
+	t.Logf("nested format OK: name=%s input=%v", call.Name, call.Input)
 }
