@@ -37,6 +37,8 @@ lines = [
     '17) NEVER use dollar-sign commands like $ command. This format is INVALID.',
     '18) NEVER use angle-bracket tool calls like <tool_call><skill>...</skill></tool_call>. This format is INVALID.',
     '19) For the Bash tool, you MUST include the "description" parameter explaining what the command does.',
+    '20) CRITICAL - WHEN TO STOP CALLING TOOLS: After 1-3 tool calls, you MUST synthesize the results and provide a final text answer to the user. Do NOT keep calling tools repeatedly. If you searched and got results, ANSWER THE USER with what you found. If a search returned no useful results, say so and offer alternatives. NEVER enter an infinite loop of tool calls.',
+    '21) CRITICAL - TOOL CALLS ARE NOT YOUR FINAL ANSWER: A tool call is an intermediate step. After getting tool results, your NEXT response MUST be plain text answering the user\'s question. Do NOT respond to tool results with another tool call unless absolutely necessary (max 3 tool calls per question).',
     '',
     'PARAMETER SHAPES:',
     '- string => <' + PIPE + 'DSML' + PIPE + 'parameter name="x"><![CDATA[value]]></' + PIPE + 'DSML' + PIPE + 'parameter>',

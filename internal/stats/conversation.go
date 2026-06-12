@@ -8,8 +8,9 @@ import (
 
 // ConvState 对话状态，包含 MiMo 对话 ID 和最后一条 AI 消息 ID
 type ConvState struct {
-	MimoConvID string `json:"mimoConvID"`
-	ParentID   string `json:"parentID"`
+	MimoConvID    string `json:"mimoConvID"`
+	ParentID      string `json:"parentID"`
+	OriginalQuery string `json:"originalQuery,omitempty"`
 }
 
 // ConversationStore 对话 ID 映射存储
@@ -81,6 +82,30 @@ func (s *ConversationStore) SetParentID(clientConvID, parentID string) {
 		s.store[clientConvID] = st
 	}
 	st.ParentID = parentID
+	s.save()
+}
+
+// GetOriginalQuery 获取对话的原始用户问题
+func (s *ConversationStore) GetOriginalQuery(clientConvID string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	st, ok := s.store[clientConvID]
+	if !ok {
+		return ""
+	}
+	return st.OriginalQuery
+}
+
+// SetOriginalQuery 设置对话的原始用户问题
+func (s *ConversationStore) SetOriginalQuery(clientConvID, query string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, ok := s.store[clientConvID]
+	if !ok {
+		st = &ConvState{}
+		s.store[clientConvID] = st
+	}
+	st.OriginalQuery = query
 	s.save()
 }
 

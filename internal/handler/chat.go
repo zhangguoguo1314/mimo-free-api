@@ -13,6 +13,7 @@ import (
 	"github.com/wtz44/mimo-gateway/internal/adapter"
 	"github.com/wtz44/mimo-gateway/internal/mimo"
 	"github.com/wtz44/mimo-gateway/internal/pool"
+	"github.com/wtz44/mimo-gateway/internal/promptcompat"
 	"github.com/wtz44/mimo-gateway/internal/router"
 	"github.com/wtz44/mimo-gateway/internal/stats"
 	"github.com/wtz44/mimo-gateway/internal/toolcall"
@@ -68,15 +69,6 @@ func (h *ChatHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 如果有 tools 定义，注入工具调用指令到 system prompt
-	if len(req.Tools) > 0 {
-		toolPrompt := toolcall.BuildToolPrompt(req.Tools)
-		if toolPrompt != "" {
-			req.Messages = toolcall.InjectToolPrompt(req.Messages, toolPrompt)
-			log.Printf("[tools] injected %d tool definitions into prompt", len(req.Tools))
-		}
-	}
-
 	routeResult := router.RouteModel(req.Model, toMiMoMessages(req.Messages))
 	log.Printf("[route] model=%s reason=%s", routeResult.Model, routeResult.Reason)
 
@@ -91,7 +83,7 @@ func (h *ChatHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	h.handleWebChat(ctx, w, &req, routeResult.Model, req.Stream)
 }
 
-// handleWebChat 使用网页端反代
+// handleWebChat 使用网页端反代 — 无状态模式
 func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, req *adapter.OpenAIChatRequest, model string, stream bool) {
 	client, err := h.pool.Next()
 	if err != nil {
@@ -99,34 +91,19 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 		return
 	}
 
-	query := buildQuery(req.Messages)
-
-	// 对话持久化：复用 conversationId
-	clientConvID := extractConversationID(req.Messages)
-	convStore := stats.GetConvStore()
-	mimoConvID := ""
-
-	// 如果有 clientConvID，尝试复用已存储的 mimoConvID
-	if clientConvID != "" {
-		if stored, ok := convStore.GetMimoConvID(clientConvID); ok {
-			mimoConvID = stored
-		}
-	}
-	if mimoConvID == "" {
-		mimoConvID = strings.ReplaceAll(uuid.New().String(), "-", "")
+	// Stateless: build complete prompt from all messages + tools
+	query := promptcompat.BuildOpenAIPrompt(req.Messages, req.Tools)
+	if len(req.Tools) > 0 {
+		log.Printf("[tools] built stateless prompt with %d tools, query len=%d", len(req.Tools), len(query))
 	}
 
-	// 并发计数
-	parentID := ""
-	if clientConvID != "" {
-		parentID = convStore.GetParentID(clientConvID)
-	}
+	// Fresh convID for each request (stateless)
+	convID := strings.ReplaceAll(uuid.New().String(), "-", "")
 
-	// 并发计数
 	stats.Get().IncrConcurrency()
 	defer stats.Get().DecrConcurrency()
 
-	body, err := client.Chat(ctx, query, model, mimoConvID, parentID, false)
+	body, err := client.Chat(ctx, query, model, convID, "", false)
 	if err != nil {
 		log.Printf("[error] web chat: %v", err)
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("mimo error: %v", err))
@@ -197,19 +174,9 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 			model, u.PromptTokens, u.CompletionTokens, cached, reasoning)
 	}
 
-	// 保存我们自己的 conversationId（32位hex），供后续请求复用
-	if clientConvID != "" && mimoConvID != "" {
-		convStore.SetMimoConvID(clientConvID, mimoConvID)
-	}
-
-	// 保存最后一条 AI 消息 ID 作为下次请求的 parentId
-	if lastMsgID := <-lastMsgIDChan; lastMsgID != "" && clientConvID != "" {
-		convStore.SetParentID(clientConvID, lastMsgID)
-	}
-
 	// 保存对话到 MiMo 官网（维持服务端上下文的关键）
-	if mimoConvID != "" {
-		go client.SaveConversation(context.Background(), mimoConvID, query)
+	if convID != "" {
+		go client.SaveConversation(context.Background(), convID, query)
 	}
 }
 
@@ -352,94 +319,6 @@ func (h *ChatHandler) nonStreamWebToOpenAI(w http.ResponseWriter, model string, 
 	w.Write(resp)
 }
 
-// buildQuery 构建查询文本
-// 如果只有一条消息，直接返回
-// 如果有多条消息，把历史拼进 query（MiMo 不维持服务端上下文）
-func buildQuery(msgs []adapter.OpenAIMessage) string {
-	if len(msgs) <= 1 {
-		return extractQuery(msgs)
-	}
-
-	// 多条消息：拼接历史
-	var parts []string
-	for _, msg := range msgs {
-		content := extractContent(msg)
-		if content == "" {
-			continue
-		}
-		switch msg.Role {
-		case "user":
-			parts = append(parts, "User: "+content)
-		case "assistant":
-			parts = append(parts, "Assistant: "+content)
-		case "system":
-			parts = append(parts, "System: "+content)
-		}
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	// 最后一条是用户消息，前面的作为历史
-	return strings.Join(parts[:len(parts)-1], "\n") + "\n\n(以上是历史对话记录，请直接针对最后的问题作答)\n\n" + parts[len(parts)-1]
-}
-
-// extractContent 提取消息文本内容，剥离 conv:xxx: 前缀
-func extractContent(msg adapter.OpenAIMessage) string {
-	s, ok := msg.Content.(string)
-	if !ok {
-		return ""
-	}
-	if strings.HasPrefix(s, "conv:") {
-		idx := strings.Index(s[5:], ":")
-		if idx >= 0 {
-			return strings.TrimSpace(s[5+idx+1:])
-		}
-	}
-	return s
-}
-
-func extractQuery(msgs []adapter.OpenAIMessage) string {
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == "user" {
-			switch v := msgs[i].Content.(type) {
-			case string:
-				// 剥离 conv:xxx: 前缀
-				if strings.HasPrefix(v, "conv:") {
-					idx := strings.Index(v[5:], ":")
-					if idx >= 0 {
-						return strings.TrimSpace(v[5+idx+1:])
-					}
-				}
-				return v
-			}
-		}
-	}
-	return ""
-}
-
-// extractConversationID 从消息中提取对话 ID
-// 支持格式: "conv:xxx: actual message"
-func extractConversationID(msgs []adapter.OpenAIMessage) string {
-	// 检查最后一条用户消息
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == "user" {
-			if s, ok := msgs[i].Content.(string); ok {
-				if strings.HasPrefix(s, "conv:") {
-					// 格式: "conv:convID: actual message"
-					rest := s[5:] // 去掉 "conv:"
-					idx := strings.Index(rest, ":")
-					if idx >= 0 {
-						return strings.TrimSpace(rest[:idx])
-					}
-					// 格式: "conv:convID" (无冒号后缀)
-					return strings.TrimSpace(rest)
-				}
-			}
-		}
-	}
-	return ""
-}
-
 func toMiMoMessages(msgs []adapter.OpenAIMessage) []mimo.Message {
 	result := make([]mimo.Message, len(msgs))
 	for i, m := range msgs {
@@ -503,32 +382,14 @@ func (h *MessagesHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := ""
-	for i := len(req.Messages) - 1; i >= 0; i-- {
-		if req.Messages[i].Role == "user" {
-			if s, ok := req.Messages[i].Content.(string); ok {
-				query = s
-			}
-			break
-		}
-	}
-
-	// Inject tool definitions into the query if tools are provided
+	// Stateless: build complete prompt from all messages + tools
 	hasTools := len(req.Tools) > 0
+	query := promptcompat.BuildAnthropicPrompt(req.Messages, req.System, req.Tools)
 	if hasTools {
-		openaiTools := adapter.ConvertAnthropicToolsToOpenAI(req.Tools)
-		toolPrompt := toolcall.BuildToolPrompt(openaiTools)
-		if toolPrompt != "" {
-			// Prepend system message and tool prompt to the query
-			systemPrefix := ""
-			if req.System != "" {
-				systemPrefix = req.System + "\n\n"
-			}
-			query = systemPrefix + toolPrompt + "\n\nUser: " + query
-			log.Printf("[tools] injected %d tool definitions into Anthropic prompt", len(req.Tools))
-		}
+		log.Printf("[tools] built stateless Anthropic prompt with %d tools, query len=%d", len(req.Tools), len(query))
 	}
 
+	// Fresh convID for each request (stateless)
 	convID := strings.ReplaceAll(uuid.New().String(), "-", "")
 
 	stats.Get().IncrConcurrency()
@@ -669,11 +530,11 @@ func (h *MessagesHandler) Handle(w http.ResponseWriter, r *http.Request) {
 					})
 				}
 				resp := map[string]interface{}{
-					"id":         fmt.Sprintf("msg_%s", uuid.New().String()[:24]),
-					"type":       "message",
-					"role":       "assistant",
-					"content":    blocks,
-					"model":      routeResult.Model,
+					"id":          fmt.Sprintf("msg_%s", uuid.New().String()[:24]),
+					"type":        "message",
+					"role":        "assistant",
+					"content":     blocks,
+					"model":       routeResult.Model,
 					"stop_reason": "tool_use",
 				}
 				w.Header().Set("Content-Type", "application/json")
@@ -705,3 +566,4 @@ func (h *MessagesHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		stats.Get().Record(routeResult.Model, u.PromptTokens, u.CompletionTokens, cached, reasoning, u.TotalTokens)
 	}
 }
+

@@ -29,9 +29,9 @@ MiMo Free API 是一个高性能反向代理网关，将小米 MiMo AI 网页端
 
 ### 特性
 
+- 🔧 **工具调用（Tool Calling）** — 支持 OpenAI / Anthropic 双格式工具调用，自动注入工具提示、解析 DSML/XML 工具输出、长上下文智能裁剪
 - 🔥 **OpenAI + Anthropic 双格式兼容** — `/v1/chat/completions` 和 `/v1/messages`
 - 🧠 **深度思考支持** — 自动处理 MiMo 的 thinking 内容，可选择是否返回
-- 💬 **对话上下文保持** — 服务端 conversationId 持久化 + 历史拼接双保险
 - 🖼️ **多模态智能路由** — 检测图片/音频/文件自动选择 mimo-v2.5 或 mimo-v2.5-pro
 - 👥 **多账号轮转** — 支持配置多个账号，自动轮转分担负载
 - 📊 **实时统计仪表盘** — Token 用量、请求量、模型分布可视化
@@ -260,9 +260,9 @@ curl http://localhost:8080/v1/messages \
 
 ### 技术栈
 
-- **后端**: Go + Chi Router
+- **后端**: Go + Chi Router（无状态架构）
 - **前端**: React + TypeScript + Tailwind CSS + Framer Motion
-- **数据持久化**: JSON 文件（统计 + 对话映射）
+- **数据持久化**: JSON 文件（统计）
 
 ### 项目结构
 
@@ -274,15 +274,18 @@ mimo-free-api/
 │   ├── stats.json
 │   └── conversations.json
 ├── internal/
+│   ├── adapter/               # OpenAI / Anthropic 类型定义与转换
 │   ├── config/                # 配置管理
 │   ├── handler/               # HTTP 处理器
-│   │   ├── chat.go            # OpenAI 兼容接口
-│   │   ├── messages.go        # Anthropic 兼容接口
+│   │   ├── chat.go            # OpenAI + Anthropic 兼容接口（无状态）
 │   │   └── admin.go           # 管理接口
 │   ├── mimo/                  # MiMo 网页端 HTTP 客户端
 │   ├── pool/                  # 账号轮转池
-│   ├── conv/                  # 对话状态管理
-│   └── stats/                 # 统计追踪
+│   ├── prompt/                # Prompt 组装（DeepSeek 特殊 token 格式）
+│   ├── promptcompat/          # 消息规范化 + 工具注入 + 上下文裁剪
+│   ├── router/                # 模型路由
+│   ├── stats/                 # 统计追踪
+│   └── toolcall/              # 工具调用提示词 + 7 层优先级解析器
 ├── web/                       # React 前端源码
 │   ├── src/
 │   │   ├── components/
@@ -308,18 +311,6 @@ A: 支持，使用 `mimo-v2.5` 模型时支持图片、音频和文件。以 bas
 **Q: 和 Token Plan API 有什么区别？**
 A: Token Plan 是小米官方 API，有调用限制。本项目直接使用网页端，走的是网页端的免费额度。
 
-### 赞助
-
-若喜欢我的项目，可以打赏一杯咖啡鼓励，万分感激 ☕
-
-<div align="center">
-
-| 微信支付 | 支付宝 |
-|:---:|:---:|
-| <img src="assets/wechat-pay.jpg" width="200"> | <img src="assets/alipay.jpg" width="200"> |
-
-</div>
-
 ### License
 
 MIT
@@ -340,9 +331,9 @@ MiMo Free API is a high-performance reverse proxy gateway that converts Xiaomi M
 
 ### Features
 
+- 🔧 **Tool Calling** — OpenAI / Anthropic dual-format tool calling, auto-inject tool prompts, parse DSML/XML tool output, long-context smart trimming
 - 🔥 **OpenAI + Anthropic compatible** — `/v1/chat/completions` and `/v1/messages`
 - 🧠 **Deep thinking support** — Handles MiMo's thinking content automatically
-- 💬 **Conversation context** — Server-side conversationId persistence + history concatenation
 - 🖼️ **Multi-modal routing** — Auto-selects mimo-v2.5 or mimo-v2.5-pro based on content type
 - 👥 **Multi-account rotation** — Configure multiple accounts for load distribution
 - 📊 **Real-time dashboard** — Token usage, request volume, model distribution visualization
@@ -398,18 +389,6 @@ curl http://localhost:8080/v1/messages \
   -H "anthropic-version: 2023-06-01" \
   -d '{"model":"mimo-v2.5","messages":[{"role":"user","content":"Hello"}],"max_tokens":4096}'
 ```
-
-### Sponsor
-
-If you enjoy this project, consider buying me a coffee! ☕
-
-<div align="center">
-
-| WeChat Pay | Alipay |
-|:---:|:---:|
-| <img src="assets/wechat-pay.jpg" width="200"> | <img src="assets/alipay.jpg" width="200"> |
-
-</div>
 
 ### License
 
