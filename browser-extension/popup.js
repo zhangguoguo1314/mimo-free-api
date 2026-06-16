@@ -43,50 +43,66 @@ document.addEventListener('DOMContentLoaded', () => {
 
       currentCookies = {};
 
-      // 方法1: 优先使用 chrome.cookies API 获取（可以获取所有 Cookie）
-      console.log('[Popup] 尝试通过 chrome.cookies API 获取...');
+      // 方法1: 从 background 获取拦截到的 Cookie（最可靠）
+      console.log('[Popup] 从 background 获取拦截的 Cookie...');
       try {
-        const apiCookies = await getCookiesFromAPI(tab.url);
-        console.log('[Popup] API 返回:', apiCookies);
-        currentCookies = { ...currentCookies, ...apiCookies };
-      } catch (e) {
-        console.log('[Popup] API 获取失败:', e.message);
-      }
-
-      // 方法2: 动态注入脚本获取 document.cookie（作为补充）
-      console.log('[Popup] 尝试动态注入脚本获取 Cookie...');
-      try {
-        const results = await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: () => {
-            const cookies = document.cookie;
-            console.log('[Injected] document.cookie:', cookies);
-            
-            const result = {};
-            if (cookies) {
-              const pairs = cookies.split(';');
-              for (let pair of pairs) {
-                const [name, ...valueParts] = pair.trim().split('=');
-                const value = valueParts.join('=');
-                
-                if (name === 'userId') {
-                  result.user_id = value;
-                }
-                if (name === 'xiaomichatbot_ph') {
-                  result.ph = value;
-                }
-              }
-            }
-            return result;
-          }
-        });
-        
-        console.log('[Popup] 注入脚本返回:', results);
-        if (results && results[0] && results[0].result) {
-          currentCookies = { ...currentCookies, ...results[0].result };
+        const response = await chrome.runtime.sendMessage({ action: 'getCapturedCookies' });
+        console.log('[Popup] Background 返回:', response);
+        if (response && response.cookies) {
+          currentCookies = { ...currentCookies, ...response.cookies };
         }
       } catch (e) {
-        console.log('[Popup] 注入脚本失败:', e.message);
+        console.log('[Popup] Background 获取失败:', e.message);
+      }
+
+      // 方法2: 使用 chrome.cookies API 获取
+      if (!currentCookies.service_token || !currentCookies.user_id || !currentCookies.ph) {
+        console.log('[Popup] 尝试通过 chrome.cookies API 获取...');
+        try {
+          const apiCookies = await getCookiesFromAPI(tab.url);
+          console.log('[Popup] API 返回:', apiCookies);
+          currentCookies = { ...currentCookies, ...apiCookies };
+        } catch (e) {
+          console.log('[Popup] API 获取失败:', e.message);
+        }
+      }
+
+      // 方法3: 动态注入脚本获取 document.cookie
+      if (!currentCookies.user_id || !currentCookies.ph) {
+        console.log('[Popup] 尝试动态注入脚本获取 Cookie...');
+        try {
+          const results = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: () => {
+              const cookies = document.cookie;
+              console.log('[Injected] document.cookie:', cookies);
+              
+              const result = {};
+              if (cookies) {
+                const pairs = cookies.split(';');
+                for (let pair of pairs) {
+                  const [name, ...valueParts] = pair.trim().split('=');
+                  const value = valueParts.join('=');
+                  
+                  if (name === 'userId') {
+                    result.user_id = value;
+                  }
+                  if (name === 'xiaomichatbot_ph') {
+                    result.ph = value;
+                  }
+                }
+              }
+              return result;
+            }
+          });
+          
+          console.log('[Popup] 注入脚本返回:', results);
+          if (results && results[0] && results[0].result) {
+            currentCookies = { ...currentCookies, ...results[0].result };
+          }
+        } catch (e) {
+          console.log('[Popup] 注入脚本失败:', e.message);
+        }
       }
 
       console.log('[Popup] 最终 Cookie:', currentCookies);
@@ -99,10 +115,10 @@ document.addEventListener('DOMContentLoaded', () => {
         showStatus('success', '✓ 成功抓取全部 Cookie');
         saveRow.style.display = 'flex';
       } else if (found > 0) {
-        showStatus('error', `⚠ 只找到 ${found}/3 个 Cookie`);
+        showStatus('error', `⚠ 只找到 ${found}/3 个 Cookie，请在 MiMo 中发送一条消息后再试`);
         saveRow.style.display = 'flex';
       } else {
-        showStatus('error', '✗ 未找到 Cookie，请确认已登录');
+        showStatus('error', '✗ 未找到 Cookie，请在 MiMo 中发送一条消息后再试');
       }
 
     } catch (e) {
@@ -117,76 +133,36 @@ document.addEventListener('DOMContentLoaded', () => {
   async function getCookiesFromAPI(url) {
     const result = {};
     
-    // 解析域名
     const urlObj = new URL(url);
     const hostname = urlObj.hostname;
     console.log('[Popup] 目标域名:', hostname);
     
-    // 方法1: 获取当前域名的所有 Cookie
-    console.log('[Popup] 获取当前域名 Cookie...');
+    // 获取当前域名
     const cookies1 = await chrome.cookies.getAll({ domain: hostname });
     console.log('[Popup] 当前域名 Cookie 数量:', cookies1.length);
     extractCookies(cookies1, result);
     
-    // 方法2: 获取父域名 .xiaomimimo.com 的 Cookie
-    if (result.service_token && result.user_id && result.ph) {
-      return result;
-    }
-    
-    console.log('[Popup] 获取父域名 Cookie...');
-    const cookies2 = await chrome.cookies.getAll({ domain: '.xiaomimimo.com' });
-    console.log('[Popup] 父域名 Cookie 数量:', cookies2.length);
-    extractCookies(cookies2, result);
-    
-    // 方法3: 获取所有 Cookie（最后手段）
-    if (result.service_token && result.user_id && result.ph) {
-      return result;
-    }
-    
-    console.log('[Popup] 获取所有 Cookie...');
-    const allCookies = await chrome.cookies.getAll({});
-    console.log('[Popup] 所有 Cookie 数量:', allCookies.length);
-    
-    // 只检查 xiaomimimo 相关的
-    for (const c of allCookies) {
-      if (c.domain.includes('xiaomimimo')) {
-        console.log(`[Popup] 检查: ${c.name} @ ${c.domain}`);
-        checkCookie(c, result);
-      }
+    // 获取父域名
+    if (!result.service_token || !result.user_id || !result.ph) {
+      const cookies2 = await chrome.cookies.getAll({ domain: '.xiaomimimo.com' });
+      console.log('[Popup] 父域名 Cookie 数量:', cookies2.length);
+      extractCookies(cookies2, result);
     }
     
     return result;
   }
 
-  // 从 Cookie 数组中提取目标 Cookie
   function extractCookies(cookies, result) {
     for (const c of cookies) {
-      console.log(`[Popup] 检查: ${c.name} @ ${c.domain}`);
-      checkCookie(c, result);
-    }
-  }
-
-  // 检查单个 Cookie
-  function checkCookie(c, result) {
-    const name = c.name;
-    
-    // serviceToken - 多种可能的名字
-    if (name === 'serviceToken' || name === 'service_token' || 
-        name.toLowerCase() === 'servicetoken') {
-      result.service_token = c.value;
-      console.log('[Popup] ✓ 找到 service_token:', c.value.substring(0, 30) + '...');
-    }
-    
-    // userId
-    if (name === 'userId' || name === 'user_id' || name === 'cUserId') {
-      result.user_id = c.value;
-      console.log('[Popup] ✓ 找到 user_id:', c.value);
-    }
-    
-    // ph
-    if (name === 'xiaomichatbot_ph' || name === 'ph' || name.includes('_ph')) {
-      result.ph = c.value;
-      console.log('[Popup] ✓ 找到 ph:', c.value.substring(0, 30) + '...');
+      if (c.name === 'serviceToken' || c.name === 'service_token') {
+        result.service_token = c.value;
+      }
+      if (c.name === 'userId') {
+        result.user_id = c.value;
+      }
+      if (c.name === 'xiaomichatbot_ph') {
+        result.ph = c.value;
+      }
     }
   }
 
@@ -259,16 +235,14 @@ document.addEventListener('DOMContentLoaded', () => {
     resultBox.classList.add('show');
     quickCopy.classList.add('show');
 
-    // service_token
     if (cookies.service_token) {
       serviceTokenVal.textContent = cookies.service_token.substring(0, 25) + '...';
       serviceTokenVal.className = 'cookie-value ok';
     } else {
-      serviceTokenVal.textContent = '未找到';
+      serviceTokenVal.textContent = '未找到 - 请发送消息后再试';
       serviceTokenVal.className = 'cookie-value miss';
     }
 
-    // user_id
     if (cookies.user_id) {
       userIdVal.textContent = cookies.user_id;
       userIdVal.className = 'cookie-value ok';
@@ -277,7 +251,6 @@ document.addEventListener('DOMContentLoaded', () => {
       userIdVal.className = 'cookie-value miss';
     }
 
-    // ph
     if (cookies.ph) {
       phVal.textContent = cookies.ph.substring(0, 25) + '...';
       phVal.className = 'cookie-value ok';
@@ -286,7 +259,6 @@ document.addEventListener('DOMContentLoaded', () => {
       phVal.className = 'cookie-value miss';
     }
 
-    // 更新配置预览
     const config = generateConfig([{
       id: '示例账号',
       ...cookies,
@@ -295,7 +267,6 @@ document.addEventListener('DOMContentLoaded', () => {
     configPreview.textContent = JSON.stringify(config, null, 2);
   }
 
-  // 生成配置
   function generateConfig(accounts) {
     return {
       port: "7860",
@@ -311,7 +282,6 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 
-  // 加载账号列表
   function loadAccounts() {
     chrome.storage.local.get(['accounts'], (data) => {
       savedAccounts = data.accounts || [];
@@ -319,7 +289,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 渲染账号列表
   function renderAccounts() {
     accountCount.textContent = savedAccounts.length;
     
@@ -338,7 +307,6 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
     `).join('');
 
-    // 绑定按钮事件
     accountList.querySelectorAll('.small-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const idx = parseInt(e.target.dataset.idx);
@@ -358,7 +326,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 复制到剪贴板
   function copyToClipboard(text) {
     navigator.clipboard.writeText(text).catch(() => {
       const input = document.createElement('textarea');
@@ -370,7 +337,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 显示状态
   function showStatus(type, msg) {
     statusEl.className = 'status ' + type + ' show';
     statusEl.textContent = msg;
