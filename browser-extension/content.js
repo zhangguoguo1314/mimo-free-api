@@ -41,14 +41,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'getCookies') {
     const cookies = readDocumentCookie();
     console.log('[MiMo Cookie Helper] 返回 Cookie:', cookies);
-    sendResponse({ cookies });
+    sendResponse({ cookies, success: true });
   }
   
-  return true;
+  return true; // 保持消息通道开放
 });
 
 // 页面加载完成后也打印一次
-window.addEventListener('load', () => {
-  console.log('[MiMo Cookie Helper] 页面加载完成');
+if (document.readyState === 'complete') {
+  console.log('[MiMo Cookie Helper] 页面已加载完成');
   readDocumentCookie();
-});
+} else {
+  window.addEventListener('load', () => {
+    console.log('[MiMo Cookie Helper] 页面加载完成');
+    readDocumentCookie();
+  });
+}
