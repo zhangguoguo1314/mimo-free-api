@@ -43,13 +43,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
       currentCookies = {};
 
-      // 方法1: 动态注入脚本获取 document.cookie
+      // 方法1: 优先使用 chrome.cookies API 获取（可以获取所有 Cookie）
+      console.log('[Popup] 尝试通过 chrome.cookies API 获取...');
+      try {
+        const apiCookies = await getCookiesFromAPI(tab.url);
+        console.log('[Popup] API 返回:', apiCookies);
+        currentCookies = { ...currentCookies, ...apiCookies };
+      } catch (e) {
+        console.log('[Popup] API 获取失败:', e.message);
+      }
+
+      // 方法2: 动态注入脚本获取 document.cookie（作为补充）
       console.log('[Popup] 尝试动态注入脚本获取 Cookie...');
       try {
         const results = await chrome.scripting.executeScript({
           target: { tabId: tab.id },
           func: () => {
-            // 在页面上下文中执行
             const cookies = document.cookie;
             console.log('[Injected] document.cookie:', cookies);
             
@@ -60,9 +69,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 const [name, ...valueParts] = pair.trim().split('=');
                 const value = valueParts.join('=');
                 
-                if (name === 'serviceToken' || name === 'service_token' || name.toLowerCase() === 'servicetoken') {
-                  result.service_token = value;
-                }
                 if (name === 'userId') {
                   result.user_id = value;
                 }
@@ -81,16 +87,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       } catch (e) {
         console.log('[Popup] 注入脚本失败:', e.message);
-      }
-
-      // 方法2: 通过 chrome.cookies API 获取
-      console.log('[Popup] 尝试通过 chrome.cookies API 获取...');
-      try {
-        const apiCookies = await getCookiesFromAPI(tab.url);
-        console.log('[Popup] API 返回:', apiCookies);
-        currentCookies = { ...currentCookies, ...apiCookies };
-      } catch (e) {
-        console.log('[Popup] API 获取失败:', e.message);
       }
 
       console.log('[Popup] 最终 Cookie:', currentCookies);
@@ -123,47 +119,75 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // 解析域名
     const urlObj = new URL(url);
-    const domain = urlObj.hostname;
-    console.log('[Popup] 目标域名:', domain);
+    const hostname = urlObj.hostname;
+    console.log('[Popup] 目标域名:', hostname);
     
-    // 获取指定域名的 Cookie
-    const cookies = await chrome.cookies.getAll({ domain: domain });
-    console.log('[Popup] 域名 Cookie 数量:', cookies.length);
+    // 方法1: 获取当前域名的所有 Cookie
+    console.log('[Popup] 获取当前域名 Cookie...');
+    const cookies1 = await chrome.cookies.getAll({ domain: hostname });
+    console.log('[Popup] 当前域名 Cookie 数量:', cookies1.length);
+    extractCookies(cookies1, result);
     
-    for (const c of cookies) {
-      console.log(`[Popup] 检查: ${c.name}`);
-      
-      if (c.name === 'serviceToken' || c.name === 'service_token' || c.name.toLowerCase() === 'servicetoken') {
-        result.service_token = c.value;
-        console.log('[Popup] ✓ 找到 service_token');
-      }
-      if (c.name === 'userId') {
-        result.user_id = c.value;
-        console.log('[Popup] ✓ 找到 user_id:', c.value);
-      }
-      if (c.name === 'xiaomichatbot_ph') {
-        result.ph = c.value;
-        console.log('[Popup] ✓ 找到 ph');
-      }
+    // 方法2: 获取父域名 .xiaomimimo.com 的 Cookie
+    if (result.service_token && result.user_id && result.ph) {
+      return result;
     }
     
-    // 如果没找到，尝试获取所有 Cookie
-    if (Object.keys(result).length === 0) {
-      console.log('[Popup] 尝试获取所有 Cookie...');
-      const allCookies = await chrome.cookies.getAll({});
-      
-      for (const c of allCookies) {
-        if (c.domain.includes('xiaomimimo')) {
-          console.log(`[Popup] 检查所有: ${c.name} @ ${c.domain}`);
-          
-          if (c.name === 'serviceToken' || c.name === 'service_token' || c.name.toLowerCase() === 'servicetoken') result.service_token = c.value;
-          if (c.name === 'userId') result.user_id = c.value;
-          if (c.name === 'xiaomichatbot_ph') result.ph = c.value;
-        }
+    console.log('[Popup] 获取父域名 Cookie...');
+    const cookies2 = await chrome.cookies.getAll({ domain: '.xiaomimimo.com' });
+    console.log('[Popup] 父域名 Cookie 数量:', cookies2.length);
+    extractCookies(cookies2, result);
+    
+    // 方法3: 获取所有 Cookie（最后手段）
+    if (result.service_token && result.user_id && result.ph) {
+      return result;
+    }
+    
+    console.log('[Popup] 获取所有 Cookie...');
+    const allCookies = await chrome.cookies.getAll({});
+    console.log('[Popup] 所有 Cookie 数量:', allCookies.length);
+    
+    // 只检查 xiaomimimo 相关的
+    for (const c of allCookies) {
+      if (c.domain.includes('xiaomimimo')) {
+        console.log(`[Popup] 检查: ${c.name} @ ${c.domain}`);
+        checkCookie(c, result);
       }
     }
     
     return result;
+  }
+
+  // 从 Cookie 数组中提取目标 Cookie
+  function extractCookies(cookies, result) {
+    for (const c of cookies) {
+      console.log(`[Popup] 检查: ${c.name} @ ${c.domain}`);
+      checkCookie(c, result);
+    }
+  }
+
+  // 检查单个 Cookie
+  function checkCookie(c, result) {
+    const name = c.name;
+    
+    // serviceToken - 多种可能的名字
+    if (name === 'serviceToken' || name === 'service_token' || 
+        name.toLowerCase() === 'servicetoken') {
+      result.service_token = c.value;
+      console.log('[Popup] ✓ 找到 service_token:', c.value.substring(0, 30) + '...');
+    }
+    
+    // userId
+    if (name === 'userId' || name === 'user_id' || name === 'cUserId') {
+      result.user_id = c.value;
+      console.log('[Popup] ✓ 找到 user_id:', c.value);
+    }
+    
+    // ph
+    if (name === 'xiaomichatbot_ph' || name === 'ph' || name.includes('_ph')) {
+      result.ph = c.value;
+      console.log('[Popup] ✓ 找到 ph:', c.value.substring(0, 30) + '...');
+    }
   }
 
   // 单个复制按钮
