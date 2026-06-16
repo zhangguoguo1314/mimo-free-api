@@ -33,29 +33,73 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       
-      if (!tab.url.includes('xiaomimimo.com')) {
-        showStatus('error', '请先打开 MiMo 网页 (aistudio.xiaomimimo.com)');
-        grabBtn.disabled = false;
-        return;
-      }
+      console.log('当前页面:', tab.url);
 
-      // 获取 Cookie
+      // 获取所有 Cookie（不限制域名）
       const allCookies = await chrome.cookies.getAll({});
+      console.log('所有 Cookie 数量:', allCookies.length);
+      
+      // 打印所有 Cookie 用于调试
+      const debugInfo = allCookies.map(c => ({
+        domain: c.domain,
+        name: c.name,
+        value: c.value.substring(0, 30) + '...'
+      }));
+      console.log('所有 Cookie:', debugInfo);
+
       currentCookies = {};
 
+      // 方法1: 精确匹配域名
+      const mimoCookies = await chrome.cookies.getAll({ domain: '.xiaomimimo.com' });
+      console.log('xiaomimimo.com 域名 Cookie:', mimoCookies);
+
+      // 方法2: 遍历所有 Cookie，模糊匹配
       for (const c of allCookies) {
-        if (c.domain.includes('mimo') || c.domain.includes('xiaomi')) {
-          if (c.name === 'serviceToken') {
-            currentCookies.service_token = c.value;
+        const domain = c.domain.toLowerCase();
+        const name = c.name.toLowerCase();
+        
+        // 匹配 MiMo/Xiaomi 相关域名
+        if (domain.includes('mimo') || domain.includes('xiaomi') || domain.includes('xiaomimimo')) {
+          console.log(`检查 Cookie: ${c.name} @ ${c.domain}`);
+          
+          // serviceToken - 多种可能的名字
+          if (name === 'servicetoken' || name === 'service_token' || name.includes('token')) {
+            if (c.value && c.value.length > 10) {
+              currentCookies.service_token = c.value;
+              console.log('✓ 找到 service_token');
+            }
           }
-          if (c.name === 'userId' || c.name === 'cUserId') {
-            if (!currentCookies.user_id) currentCookies.user_id = c.value;
+          
+          // userId - 多种可能的名字
+          if (name === 'userid' || name === 'user_id' || name === 'cuserid' || name === 'uid') {
+            if (c.value && /^\d+$/.test(c.value)) {
+              currentCookies.user_id = c.value;
+              console.log('✓ 找到 user_id:', c.value);
+            }
           }
-          if (c.name === 'xiaomichatbot_ph' || c.name.includes('_ph')) {
-            currentCookies.ph = c.value;
+          
+          // ph - 多种可能的名字
+          if (name === 'xiaomichatbot_ph' || name === 'ph' || name.includes('_ph') || name.includes('chatbot')) {
+            if (c.value && c.value.includes('=')) {
+              currentCookies.ph = c.value;
+              console.log('✓ 找到 ph');
+            }
           }
         }
       }
+
+      // 方法3: 再次检查，更宽松的匹配
+      if (!currentCookies.service_token) {
+        for (const c of allCookies) {
+          if (c.name.toLowerCase().includes('servicetoken') && c.value.length > 20) {
+            currentCookies.service_token = c.value;
+            console.log('✓ 宽松匹配找到 service_token');
+            break;
+          }
+        }
+      }
+
+      console.log('最终抓取结果:', currentCookies);
 
       // 显示结果
       displayResults(currentCookies);
@@ -69,9 +113,15 @@ document.addEventListener('DOMContentLoaded', () => {
         saveRow.style.display = 'flex';
       } else {
         showStatus('error', '✗ 未找到 Cookie，请确认已登录');
+        // 显示调试信息
+        const allNames = allCookies.filter(c => 
+          c.domain.includes('mimo') || c.domain.includes('xiaomi')
+        ).map(c => c.name);
+        console.log('MiMo/Xiaomi 相关 Cookie 名称:', allNames);
       }
 
     } catch (e) {
+      console.error('抓取错误:', e);
       showStatus('error', '错误: ' + e.message);
     } finally {
       grabBtn.disabled = false;
@@ -149,7 +199,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // service_token
     if (cookies.service_token) {
-      serviceTokenVal.textContent = cookies.service_token.substring(0, 20) + '...';
+      serviceTokenVal.textContent = cookies.service_token.substring(0, 25) + '...';
       serviceTokenVal.className = 'cookie-value ok';
     } else {
       serviceTokenVal.textContent = '未找到';
@@ -167,7 +217,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ph
     if (cookies.ph) {
-      phVal.textContent = cookies.ph.substring(0, 20) + '...';
+      phVal.textContent = cookies.ph.substring(0, 25) + '...';
       phVal.className = 'cookie-value ok';
     } else {
       phVal.textContent = '未找到';
