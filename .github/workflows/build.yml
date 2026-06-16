@@ -45,8 +45,6 @@ jobs:
         npm ci
         npm run build
         cd ..
-        mkdir -p static
-        cp -r web/dist/* static/
 
     - name: Setup Go
       uses: actions/setup-go@v5
