@@ -1,3 +1,12 @@
+---
+title: MiMo Free API
+emoji: ⚡
+colorFrom: orange
+colorTo: red
+sdk: docker
+app_port: 7860
+---
+
 <div align="center">
 
 # ⚡ MiMo Free API

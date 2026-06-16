@@ -20,5 +20,5 @@ FROM alpine:3.19
 RUN apk --no-cache add ca-certificates tzdata
 WORKDIR /app
 COPY --from=backend /app/mimo-gateway .
-EXPOSE 8080
+EXPOSE 7860
 CMD ["./mimo-gateway"]

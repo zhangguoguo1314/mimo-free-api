@@ -33,7 +33,7 @@ func Load(p string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			cfg = &Config{Port: "8080", APIKey: "sk-mimo", DefaultModel: "mimo-v2.5-pro"}
+			cfg = &Config{Port: "7860", APIKey: "sk-mimo", DefaultModel: "mimo-v2.5-pro"}
 			return cfg, Save()
 		}
 		return nil, err
