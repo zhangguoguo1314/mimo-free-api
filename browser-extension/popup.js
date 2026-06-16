@@ -43,16 +43,44 @@ document.addEventListener('DOMContentLoaded', () => {
 
       currentCookies = {};
 
-      // 方法1: 通过内容脚本获取 document.cookie
-      console.log('[Popup] 尝试通过内容脚本获取...');
+      // 方法1: 动态注入脚本获取 document.cookie
+      console.log('[Popup] 尝试动态注入脚本获取 Cookie...');
       try {
-        const response = await sendMessageToTab(tab.id, { action: 'getCookies' });
-        console.log('[Popup] 内容脚本返回:', response);
-        if (response && response.cookies) {
-          currentCookies = { ...currentCookies, ...response.cookies };
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            // 在页面上下文中执行
+            const cookies = document.cookie;
+            console.log('[Injected] document.cookie:', cookies);
+            
+            const result = {};
+            if (cookies) {
+              const pairs = cookies.split(';');
+              for (let pair of pairs) {
+                const [name, ...valueParts] = pair.trim().split('=');
+                const value = valueParts.join('=');
+                
+                if (name === 'serviceToken') {
+                  result.service_token = value;
+                }
+                if (name === 'userId') {
+                  result.user_id = value;
+                }
+                if (name === 'xiaomichatbot_ph') {
+                  result.ph = value;
+                }
+              }
+            }
+            return result;
+          }
+        });
+        
+        console.log('[Popup] 注入脚本返回:', results);
+        if (results && results[0] && results[0].result) {
+          currentCookies = { ...currentCookies, ...results[0].result };
         }
       } catch (e) {
-        console.log('[Popup] 内容脚本通信失败:', e.message);
+        console.log('[Popup] 注入脚本失败:', e.message);
       }
 
       // 方法2: 通过 chrome.cookies API 获取
@@ -88,33 +116,6 @@ document.addEventListener('DOMContentLoaded', () => {
       grabBtn.disabled = false;
     }
   });
-
-  // 向标签页发送消息（带重试）
-  function sendMessageToTab(tabId, message, retries = 3) {
-    return new Promise((resolve, reject) => {
-      let attempts = 0;
-      
-      const trySend = () => {
-        attempts++;
-        console.log(`[Popup] 发送消息尝试 ${attempts}/${retries}`);
-        
-        chrome.tabs.sendMessage(tabId, message, (response) => {
-          if (chrome.runtime.lastError) {
-            console.log(`[Popup] 尝试 ${attempts} 失败:`, chrome.runtime.lastError.message);
-            if (attempts < retries) {
-              setTimeout(trySend, 100); // 100ms 后重试
-            } else {
-              reject(new Error(chrome.runtime.lastError.message));
-            }
-          } else {
-            resolve(response);
-          }
-        });
-      };
-      
-      trySend();
-    });
-  }
 
   // 通过 chrome.cookies API 获取
   async function getCookiesFromAPI(url) {
