@@ -60,7 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const [name, ...valueParts] = pair.trim().split('=');
                 const value = valueParts.join('=');
                 
-                if (name === 'serviceToken') {
+                if (name === 'serviceToken' || name === 'service_token' || name.toLowerCase() === 'servicetoken') {
                   result.service_token = value;
                 }
                 if (name === 'userId') {
@@ -133,7 +133,7 @@ document.addEventListener('DOMContentLoaded', () => {
     for (const c of cookies) {
       console.log(`[Popup] 检查: ${c.name}`);
       
-      if (c.name === 'serviceToken') {
+      if (c.name === 'serviceToken' || c.name === 'service_token' || c.name.toLowerCase() === 'servicetoken') {
         result.service_token = c.value;
         console.log('[Popup] ✓ 找到 service_token');
       }
@@ -156,7 +156,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (c.domain.includes('xiaomimimo')) {
           console.log(`[Popup] 检查所有: ${c.name} @ ${c.domain}`);
           
-          if (c.name === 'serviceToken') result.service_token = c.value;
+          if (c.name === 'serviceToken' || c.name === 'service_token' || c.name.toLowerCase() === 'servicetoken') result.service_token = c.value;
           if (c.name === 'userId') result.user_id = c.value;
           if (c.name === 'xiaomichatbot_ph') result.ph = c.value;
         }
