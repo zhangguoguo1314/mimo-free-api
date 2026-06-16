@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Key, Cpu, Save, Eye, EyeOff, Check, Loader2, Users, Plus, Trash2, Globe } from 'lucide-react'
+import { Key, Cpu, Save, Eye, EyeOff, Check, Loader2, Users, Plus, Trash2, Globe, ClipboardPaste, TestTube } from 'lucide-react'
 import { useSettings } from '../contexts/SettingsContext'
 import { apiFetch } from '../lib/api'
 
@@ -32,6 +32,10 @@ export function ConfigPanel() {
   const [newUserId, setNewUserId] = useState('')
   const [newPh, setNewPh] = useState('')
   const [adding, setAdding] = useState(false)
+  const [pasteJson, setPasteJson] = useState('')
+  const [showPaste, setShowPaste] = useState(false)
+  const [testingAccount, setTestingAccount] = useState<string | null>(null)
+  const [testResults, setTestResults] = useState<Record<string, { status: 'ok' | 'error' | 'testing', message: string }>>({})
 
   const loadConfig = () => {
     apiFetch('/admin/api/config')
@@ -96,6 +100,90 @@ export function ConfigPanel() {
       body: JSON.stringify({ id })
     })
     if (res.ok) loadConfig()
+  }
+
+  // 处理粘贴的 JSON 配置
+  const handlePasteJson = async () => {
+    if (!pasteJson.trim()) return
+    
+    try {
+      const parsed = JSON.parse(pasteJson)
+      let accountsToAdd: Account[] = []
+      
+      // 支持两种格式：{ accounts: [...] } 或直接 [...]
+      if (parsed.accounts && Array.isArray(parsed.accounts)) {
+        accountsToAdd = parsed.accounts
+      } else if (Array.isArray(parsed)) {
+        accountsToAdd = parsed
+      } else if (parsed.id && parsed.service_token) {
+        accountsToAdd = [parsed as Account]
+      }
+      
+      if (accountsToAdd.length === 0) {
+        alert(lang === 'zh' ? '未找到有效的账号配置' : 'No valid account config found')
+        return
+      }
+      
+      // 逐个添加账号
+      let added = 0
+      for (const acc of accountsToAdd) {
+        if (!acc.id || !acc.service_token) continue
+        
+        const res = await apiFetch('/admin/api/accounts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: acc.id,
+            service_token: acc.service_token,
+            user_id: acc.user_id || '',
+            ph: acc.ph || '',
+            active: acc.active !== false
+          })
+        })
+        if (res.ok) added++
+      }
+      
+      if (added > 0) {
+        setPasteJson('')
+        setShowPaste(false)
+        loadConfig()
+        alert(lang === 'zh' ? `成功添加 ${added} 个账号` : `Added ${added} accounts`)
+      } else {
+        alert(lang === 'zh' ? '添加失败，请检查配置格式' : 'Failed to add, please check config format')
+      }
+    } catch (e) {
+      alert(lang === 'zh' ? 'JSON 格式错误: ' + (e as Error).message : 'JSON parse error: ' + (e as Error).message)
+    }
+  }
+
+  // 测试账号有效性
+  const handleTestAccount = async (account: Account) => {
+    setTestingAccount(account.id)
+    setTestResults(prev => ({ ...prev, [account.id]: { status: 'testing', message: lang === 'zh' ? '测试中...' : 'Testing...' } }))
+    
+    try {
+      // 调用后端测试接口
+      const res = await apiFetch('/admin/api/accounts/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: account.id })
+      })
+      
+      if (res.ok) {
+        const data = await res.json()
+        if (data.valid) {
+          setTestResults(prev => ({ ...prev, [account.id]: { status: 'ok', message: lang === 'zh' ? '✓ 账号有效' : '✓ Account valid' } }))
+        } else {
+          setTestResults(prev => ({ ...prev, [account.id]: { status: 'error', message: lang === 'zh' ? '✗ Cookie 已过期' : '✗ Cookie expired' } }))
+        }
+      } else {
+        setTestResults(prev => ({ ...prev, [account.id]: { status: 'error', message: lang === 'zh' ? '✗ 测试失败' : '✗ Test failed' } }))
+      }
+    } catch (e) {
+      setTestResults(prev => ({ ...prev, [account.id]: { status: 'error', message: lang === 'zh' ? '✗ 网络错误' : '✗ Network error' } }))
+    } finally {
+      setTestingAccount(null)
+    }
   }
 
   const maskToken = (token: string) => {
@@ -191,6 +279,13 @@ export function ConfigPanel() {
             <span className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
               {accounts.filter(a => a.active).length}/{accounts.length} active
             </span>
+            <motion.button onClick={() => setShowPaste(!showPaste)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                isDark ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
+              }`} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+              <ClipboardPaste className="w-4 h-4" />
+              {lang === 'zh' ? '粘贴配置' : 'Paste JSON'}
+            </motion.button>
             <motion.button onClick={() => setShowAdd(!showAdd)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors ${
                 isDark ? 'bg-purple-500/10 text-purple-400 hover:bg-purple-500/20' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
@@ -200,6 +295,41 @@ export function ConfigPanel() {
             </motion.button>
           </div>
         </div>
+
+        {/* Paste JSON Form */}
+        <AnimatePresence>
+          {showPaste && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="overflow-hidden"
+            >
+              <div className={`p-4 rounded-xl border space-y-3 ${isDark ? 'bg-white/[0.02] border-emerald-500/20' : 'bg-emerald-50/50 border-emerald-200'}`}>
+                <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                  {lang === 'zh' ? '粘贴从浏览器扩展复制的配置 JSON:' : 'Paste config JSON copied from browser extension:'}
+                </p>
+                <textarea
+                  value={pasteJson}
+                  onChange={e => setPasteJson(e.target.value)}
+                  placeholder={`{ "accounts": [{ "id": "...", "service_token": "...", "user_id": "...", "ph": "..." }] }`}
+                  className={`${inputClass} h-32 resize-none`}
+                />
+                <div className="flex gap-2 justify-end">
+                  <button onClick={() => setShowPaste(false)} className={`px-4 py-2 rounded-lg text-sm ${isDark ? 'text-gray-400 hover:text-white' : 'text-gray-500 hover:text-gray-700'} transition-colors`}>
+                    {lang === 'zh' ? '取消' : 'Cancel'}
+                  </button>
+                  <motion.button onClick={handlePasteJson}
+                    className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-lg text-sm disabled:opacity-50"
+                    whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                    <ClipboardPaste className="w-4 h-4" />
+                    {lang === 'zh' ? '导入账号' : 'Import'}
+                  </motion.button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Add Form */}
         <AnimatePresence>
@@ -272,8 +402,22 @@ export function ConfigPanel() {
                         <span className="font-mono">ph: {acc.ph || '-'}</span>
                         <span className="font-mono">token: {maskToken(acc.service_token)}</span>
                       </div>
+                      {testResults[acc.id] && (
+                        <div className={`mt-2 text-xs ${
+                          testResults[acc.id].status === 'ok' ? 'text-emerald-500' : 
+                          testResults[acc.id].status === 'error' ? 'text-red-500' : 'text-amber-500'
+                        }`}>
+                          {testResults[acc.id].message}
+                        </div>
+                      )}
                     </div>
 
+                    <motion.button onClick={() => handleTestAccount(acc)}
+                      disabled={testingAccount === acc.id}
+                      className={`p-2 rounded-lg transition-colors ${isDark ? 'text-gray-500 hover:text-blue-400 hover:bg-blue-500/10' : 'text-gray-400 hover:text-blue-500 hover:bg-blue-50'}`}
+                      whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
+                      {testingAccount === acc.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <TestTube className="w-4 h-4" />}
+                    </motion.button>
                     <motion.button onClick={() => handleDelete(acc.id)}
                       className={`p-2 rounded-lg transition-colors ${isDark ? 'text-gray-500 hover:text-red-400 hover:bg-red-500/10' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
                       whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>

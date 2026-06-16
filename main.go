@@ -81,6 +81,7 @@ func main() {
 		r.Post("/config", adminHandler.UpdateConfig)
 		r.Post("/accounts", adminHandler.AddAccount)
 		r.Delete("/accounts", adminHandler.DeleteAccount)
+		r.Post("/accounts/test", adminHandler.TestAccount)
 		r.Get("/health", adminHandler.HealthCheck)
 		r.Get("/stats", adminHandler.GetStats)
 	})

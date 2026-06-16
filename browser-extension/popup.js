@@ -3,9 +3,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const grabBtn = document.getElementById('grabBtn');
   const statusEl = document.getElementById('status');
   const resultBox = document.getElementById('resultBox');
-  const quickCopy = document.getElementById('quickCopy');
-  const configPreview = document.getElementById('configPreview');
+  const configSection = document.getElementById('configSection');
+  const configOutput = document.getElementById('configOutput');
   const copyConfigBtn = document.getElementById('copyConfigBtn');
+  const testBtn = document.getElementById('testBtn');
+  const testResult = document.getElementById('testResult');
   const accountList = document.getElementById('accountList');
   const accountCount = document.getElementById('accountCount');
   const saveRow = document.getElementById('saveRow');
@@ -29,6 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
   grabBtn.addEventListener('click', async () => {
     showStatus('loading', '正在抓取 Cookie...');
     grabBtn.disabled = true;
+    testResult.classList.remove('show');
 
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -43,7 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       currentCookies = {};
 
-      // 方法1: 从 background 获取拦截到的 Cookie（最可靠）
+      // 方法1: 从 background 获取拦截到的 Cookie
       console.log('[Popup] 从 background 获取拦截的 Cookie...');
       try {
         const response = await chrome.runtime.sendMessage({ action: 'getCapturedCookies' });
@@ -114,9 +117,11 @@ document.addEventListener('DOMContentLoaded', () => {
       if (found === 3) {
         showStatus('success', '✓ 成功抓取全部 Cookie');
         saveRow.style.display = 'flex';
+        configSection.classList.add('show');
       } else if (found > 0) {
-        showStatus('error', `⚠ 只找到 ${found}/3 个 Cookie，请在 MiMo 中发送一条消息后再试`);
+        showStatus('warn', `⚠ 只找到 ${found}/3 个 Cookie，请在 MiMo 中发送一条消息后再试`);
         saveRow.style.display = 'flex';
+        configSection.classList.add('show');
       } else {
         showStatus('error', '✗ 未找到 Cookie，请在 MiMo 中发送一条消息后再试');
       }
@@ -166,6 +171,21 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // 生成标准格式的配置
+  function generateStandardConfig(cookies, id = 'my-account') {
+    return {
+      accounts: [
+        {
+          id: id,
+          service_token: cookies.service_token || '',
+          user_id: cookies.user_id || '',
+          ph: cookies.ph || '',
+          active: true
+        }
+      ]
+    };
+  }
+
   // 单个复制按钮
   document.querySelectorAll('.copy-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -183,19 +203,60 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // 一键复制完整配置
+  // 一键复制完整配置（标准格式）
   copyConfigBtn.addEventListener('click', () => {
-    const config = generateConfig([{
-      id: accountName.value.trim() || '账号' + (savedAccounts.length + 1),
-      ...currentCookies,
-      active: true
-    }]);
+    const config = generateStandardConfig(currentCookies, accountName.value.trim() || 'my-account');
     copyToClipboard(JSON.stringify(config, null, 2));
     
     copyConfigBtn.textContent = '✓ 已复制到剪贴板';
     setTimeout(() => {
       copyConfigBtn.textContent = '一键复制完整配置';
     }, 2000);
+  });
+
+  // 测试账号有效性
+  testBtn.addEventListener('click', async () => {
+    if (!currentCookies.service_token || !currentCookies.user_id || !currentCookies.ph) {
+      testResult.textContent = '❌ Cookie 不完整，无法测试';
+      testResult.className = 'test-result err show';
+      return;
+    }
+
+    testBtn.disabled = true;
+    testBtn.textContent = '🧪 测试中...';
+    testResult.classList.remove('show');
+
+    try {
+      // 使用 MiMo API 测试账号
+      const response = await fetch('https://aistudio.xiaomimimo.com/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Cookie': `serviceToken=${currentCookies.service_token}; userId=${currentCookies.user_id}; xiaomichatbot_ph=${currentCookies.ph}`
+        },
+        body: JSON.stringify({
+          message: 'test',
+          model: 'mimo-v2.5'
+        })
+      });
+
+      if (response.ok) {
+        testResult.textContent = '✅ 账号有效！Cookie 未过期';
+        testResult.className = 'test-result ok show';
+      } else if (response.status === 401) {
+        testResult.textContent = '❌ Cookie 已过期，请重新抓取';
+        testResult.className = 'test-result err show';
+      } else {
+        testResult.textContent = `⚠️ 测试返回状态: ${response.status}`;
+        testResult.className = 'test-result warn show';
+      }
+    } catch (e) {
+      testResult.textContent = '⚠️ 测试失败: ' + e.message;
+      testResult.className = 'test-result warn show';
+    } finally {
+      testBtn.disabled = false;
+      testBtn.textContent = '🧪 测试账号有效性';
+    }
   });
 
   // 保存账号
@@ -225,7 +286,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     
-    const config = generateConfig(savedAccounts);
+    const config = { accounts: savedAccounts };
     copyToClipboard(JSON.stringify(config, null, 2));
     showStatus('success', `✓ ${savedAccounts.length} 个账号配置已复制`);
   });
@@ -233,8 +294,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // 显示抓取结果
   function displayResults(cookies) {
     resultBox.classList.add('show');
-    quickCopy.classList.add('show');
 
+    // service_token
     if (cookies.service_token) {
       serviceTokenVal.textContent = cookies.service_token.substring(0, 25) + '...';
       serviceTokenVal.className = 'cookie-value ok';
@@ -243,6 +304,7 @@ document.addEventListener('DOMContentLoaded', () => {
       serviceTokenVal.className = 'cookie-value miss';
     }
 
+    // user_id
     if (cookies.user_id) {
       userIdVal.textContent = cookies.user_id;
       userIdVal.className = 'cookie-value ok';
@@ -251,6 +313,7 @@ document.addEventListener('DOMContentLoaded', () => {
       userIdVal.className = 'cookie-value miss';
     }
 
+    // ph
     if (cookies.ph) {
       phVal.textContent = cookies.ph.substring(0, 25) + '...';
       phVal.className = 'cookie-value ok';
@@ -259,29 +322,12 @@ document.addEventListener('DOMContentLoaded', () => {
       phVal.className = 'cookie-value miss';
     }
 
-    const config = generateConfig([{
-      id: '示例账号',
-      ...cookies,
-      active: true
-    }]);
-    configPreview.textContent = JSON.stringify(config, null, 2);
+    // 更新配置预览（标准格式）
+    const config = generateStandardConfig(cookies, 'my-account');
+    configOutput.textContent = JSON.stringify(config, null, 2);
   }
 
-  function generateConfig(accounts) {
-    return {
-      port: "7860",
-      api_key: "sk-mimo",
-      default_model: "mimo-v2.5-pro",
-      accounts: accounts.map(acc => ({
-        id: acc.id,
-        service_token: acc.service_token || '',
-        user_id: acc.user_id || '',
-        ph: acc.ph || '',
-        active: acc.active !== false
-      }))
-    };
-  }
-
+  // 加载账号列表
   function loadAccounts() {
     chrome.storage.local.get(['accounts'], (data) => {
       savedAccounts = data.accounts || [];
@@ -289,6 +335,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // 渲染账号列表
   function renderAccounts() {
     accountCount.textContent = savedAccounts.length;
     
@@ -307,13 +354,14 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
     `).join('');
 
+    // 绑定按钮事件
     accountList.querySelectorAll('.small-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const idx = parseInt(e.target.dataset.idx);
         const action = e.target.dataset.action;
         
         if (action === 'copy') {
-          const config = generateConfig([savedAccounts[idx]]);
+          const config = { accounts: [savedAccounts[idx]] };
           copyToClipboard(JSON.stringify(config, null, 2));
           showStatus('success', `✓ "${savedAccounts[idx].id}" 配置已复制`);
         } else if (action === 'del') {
@@ -326,6 +374,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // 复制到剪贴板
   function copyToClipboard(text) {
     navigator.clipboard.writeText(text).catch(() => {
       const input = document.createElement('textarea');
@@ -337,6 +386,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // 显示状态
   function showStatus(type, msg) {
     statusEl.className = 'status ' + type + ' show';
     statusEl.textContent = msg;

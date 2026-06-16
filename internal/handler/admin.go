@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/wtz44/mimo-gateway/internal/config"
@@ -93,6 +94,64 @@ func (h *AdminHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 // GetStats 返回 token 用量统计
 func (h *AdminHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, stats.Get().GetStats())
+}
+
+// TestAccount 测试账号有效性
+func (h *AdminHandler) TestAccount(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
+		writeError(w, http.StatusBadRequest, "id is required")
+		return
+	}
+
+	// 查找账号
+	var account *config.Account
+	cfg := config.Get()
+	for i := range cfg.Accounts {
+		if cfg.Accounts[i].ID == req.ID {
+			account = &cfg.Accounts[i]
+			break
+		}
+	}
+
+	if account == nil {
+		writeError(w, http.StatusNotFound, "account not found")
+		return
+	}
+
+	// 测试账号有效性
+	valid := testAccountValidity(account)
+	writeJSON(w, map[string]interface{}{
+		"valid":   valid,
+		"account": req.ID,
+	})
+}
+
+// testAccountValidity 测试账号是否有效
+func testAccountValidity(acc *config.Account) bool {
+	// 构建测试请求
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", "https://aistudio.xiaomimimo.com/api/user/info", nil)
+	if err != nil {
+		return false
+	}
+
+	// 设置 Cookie
+	cookie := fmt.Sprintf("serviceToken=%s; userId=%s; xiaomichatbot_ph=%s",
+		acc.ServiceToken, acc.UserID, acc.PH)
+	req.Header.Set("Cookie", cookie)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.0")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	// 如果返回 200，说明账号有效
+	return resp.StatusCode == 200
 }
 
 func writeJSON(w http.ResponseWriter, data interface{}) {

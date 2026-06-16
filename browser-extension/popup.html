@@ -5,7 +5,7 @@
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
-  width: 360px;
+  width: 400px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: #1a1a2e;
   color: #e0e0e0;
@@ -50,6 +50,11 @@ body {
   color: #fff;
 }
 .btn-success:hover { opacity: 0.9; }
+.btn-warning {
+  background: linear-gradient(135deg, #f093fb, #f5576c);
+  color: #fff;
+}
+.btn-warning:hover { opacity: 0.9; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .status {
@@ -64,6 +69,7 @@ body {
 .status.ok { background: rgba(34,197,94,0.15); color: #22c55e; }
 .status.err { background: rgba(239,68,68,0.15); color: #ef4444; }
 .status.loading { background: rgba(102,126,234,0.15); color: #667eea; }
+.status.warn { background: rgba(245,158,11,0.15); color: #f59e0b; }
 
 /* Cookie 结果区域 */
 .result-box {
@@ -123,8 +129,8 @@ body {
 .copy-btn:hover { background: rgba(255,255,255,0.2); }
 .copy-btn.copied { background: rgba(34,197,94,0.3); }
 
-/* 一键复制区域 */
-.quick-copy {
+/* 配置输出区域 */
+.config-section {
   background: linear-gradient(135deg, rgba(102,126,234,0.2), rgba(118,75,162,0.2));
   border: 1px solid rgba(102,126,234,0.3);
   border-radius: 10px;
@@ -132,23 +138,23 @@ body {
   margin-bottom: 12px;
   display: none;
 }
-.quick-copy.show { display: block; }
+.config-section.show { display: block; }
 
-.quick-copy-title {
+.config-title {
   font-size: 12px;
   color: #667eea;
   margin-bottom: 8px;
   font-weight: 600;
 }
 
-.config-preview {
+.config-output {
   background: rgba(0,0,0,0.3);
   border-radius: 6px;
   padding: 10px;
   font-family: monospace;
   font-size: 10px;
   color: #a0aec0;
-  max-height: 100px;
+  max-height: 120px;
   overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-all;
@@ -166,7 +172,7 @@ body {
 }
 
 .account-list {
-  max-height: 120px;
+  max-height: 100px;
   overflow-y: auto;
   margin-bottom: 10px;
 }
@@ -226,6 +232,17 @@ body {
   text-align: center;
   margin-top: 8px;
 }
+
+.test-result {
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  display: none;
+}
+.test-result.show { display: block; }
+.test-result.ok { background: rgba(34,197,94,0.15); color: #22c55e; }
+.test-result.err { background: rgba(239,68,68,0.15); color: #ef4444; }
 </style>
 </head>
 <body>
@@ -263,11 +280,13 @@ body {
     </div>
   </div>
 
-  <!-- 一键复制配置 -->
-  <div class="quick-copy" id="quickCopy">
-    <div class="quick-copy-title">📋 config.json 配置预览</div>
-    <div class="config-preview" id="configPreview"></div>
+  <!-- 配置输出 -->
+  <div class="config-section" id="configSection">
+    <div class="config-title">📋 完整配置格式（可直接粘贴到Web页面）</div>
+    <div class="config-output" id="configOutput"></div>
     <button class="btn btn-success" id="copyConfigBtn">一键复制完整配置</button>
+    <button class="btn btn-warning" id="testBtn">🧪 测试账号有效性</button>
+    <div class="test-result" id="testResult"></div>
   </div>
 
   <!-- 账号管理 -->
