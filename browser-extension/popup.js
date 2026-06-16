@@ -35,76 +35,42 @@ document.addEventListener('DOMContentLoaded', () => {
       
       console.log('当前页面:', tab.url);
 
-      // 获取所有 Cookie（不限制域名）
-      const allCookies = await chrome.cookies.getAll({});
-      console.log('所有 Cookie 数量:', allCookies.length);
-      
-      // 打印所有 Cookie 用于调试
-      const debugInfo = allCookies.map(c => ({
-        domain: c.domain,
-        name: c.name,
-        value: c.value.substring(0, 30) + '...'
-      }));
-      console.log('所有 Cookie:', debugInfo);
-
-      currentCookies = {};
-
-      // 方法1: 精确匹配域名
-      const mimoCookies = await chrome.cookies.getAll({ domain: '.xiaomimimo.com' });
-      console.log('xiaomimimo.com 域名 Cookie:', mimoCookies);
-
-      // 方法2: 遍历所有 Cookie，模糊匹配
-      for (const c of allCookies) {
-        const domain = c.domain.toLowerCase();
-        const name = c.name.toLowerCase();
-        
-        // 匹配 MiMo/Xiaomi 相关域名
-        if (domain.includes('mimo') || domain.includes('xiaomi') || domain.includes('xiaomimimo')) {
-          console.log(`检查 Cookie: ${c.name} @ ${c.domain}`);
-          
-          // serviceToken - 多种可能的名字
-          if (name === 'servicetoken' || name === 'service_token' || name.includes('token')) {
-            if (c.value && c.value.length > 10) {
-              currentCookies.service_token = c.value;
-              console.log('✓ 找到 service_token');
-            }
-          }
-          
-          // userId - 多种可能的名字
-          if (name === 'userid' || name === 'user_id' || name === 'cuserid' || name === 'uid') {
-            if (c.value && /^\d+$/.test(c.value)) {
-              currentCookies.user_id = c.value;
-              console.log('✓ 找到 user_id:', c.value);
-            }
-          }
-          
-          // ph - 多种可能的名字
-          if (name === 'xiaomichatbot_ph' || name === 'ph' || name.includes('_ph') || name.includes('chatbot')) {
-            if (c.value && c.value.includes('=')) {
-              currentCookies.ph = c.value;
-              console.log('✓ 找到 ph');
-            }
-          }
-        }
+      if (!tab.url.includes('xiaomimimo.com')) {
+        showStatus('error', '请先打开 MiMo 网页 (aistudio.xiaomimimo.com)');
+        grabBtn.disabled = false;
+        return;
       }
 
-      // 方法3: 再次检查，更宽松的匹配
-      if (!currentCookies.service_token) {
-        for (const c of allCookies) {
-          if (c.name.toLowerCase().includes('servicetoken') && c.value.length > 20) {
-            currentCookies.service_token = c.value;
-            console.log('✓ 宽松匹配找到 service_token');
-            break;
-          }
+      // 方法1: 通过内容脚本获取 document.cookie
+      console.log('尝试通过内容脚本获取 Cookie...');
+      let cookiesFromContent = {};
+      try {
+        const response = await chrome.tabs.sendMessage(tab.id, { action: 'getCookies' });
+        console.log('内容脚本返回:', response);
+        if (response && response.cookies) {
+          cookiesFromContent = response.cookies;
         }
+      } catch (e) {
+        console.log('内容脚本通信失败:', e);
       }
 
-      console.log('最终抓取结果:', currentCookies);
+      // 方法2: 通过 chrome.cookies API 获取
+      console.log('尝试通过 chrome.cookies API 获取...');
+      const cookiesFromAPI = await getCookiesFromAPI();
+      console.log('API 返回:', cookiesFromAPI);
+
+      // 合并两种方法的结果
+      currentCookies = {
+        ...cookiesFromAPI,
+        ...cookiesFromContent
+      };
+
+      console.log('最终 Cookie:', currentCookies);
 
       // 显示结果
       displayResults(currentCookies);
 
-      const found = Object.keys(currentCookies).length;
+      const found = Object.keys(currentCookies).filter(k => currentCookies[k]).length;
       if (found === 3) {
         showStatus('success', '✓ 成功抓取全部 Cookie');
         saveRow.style.display = 'flex';
@@ -113,11 +79,6 @@ document.addEventListener('DOMContentLoaded', () => {
         saveRow.style.display = 'flex';
       } else {
         showStatus('error', '✗ 未找到 Cookie，请确认已登录');
-        // 显示调试信息
-        const allNames = allCookies.filter(c => 
-          c.domain.includes('mimo') || c.domain.includes('xiaomi')
-        ).map(c => c.name);
-        console.log('MiMo/Xiaomi 相关 Cookie 名称:', allNames);
       }
 
     } catch (e) {
@@ -127,6 +88,38 @@ document.addEventListener('DOMContentLoaded', () => {
       grabBtn.disabled = false;
     }
   });
+
+  // 通过 chrome.cookies API 获取
+  async function getCookiesFromAPI() {
+    const result = {};
+    
+    // 获取所有 Cookie
+    const allCookies = await chrome.cookies.getAll({});
+    console.log('所有 Cookie 数量:', allCookies.length);
+    
+    // 遍历查找
+    for (const c of allCookies) {
+      const domain = c.domain.toLowerCase();
+      const name = c.name;
+      
+      // 匹配 xiaomimimo.com 域名
+      if (domain.includes('xiaomimimo')) {
+        console.log(`检查: ${name} @ ${domain}`);
+        
+        if (name === 'serviceToken') {
+          result.service_token = c.value;
+        }
+        if (name === 'userId') {
+          result.user_id = c.value;
+        }
+        if (name === 'xiaomichatbot_ph') {
+          result.ph = c.value;
+        }
+      }
+    }
+    
+    return result;
+  }
 
   // 单个复制按钮
   document.querySelectorAll('.copy-btn').forEach(btn => {
