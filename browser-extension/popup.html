@@ -1,113 +1,263 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
-  width: 320px;
-  font-family: -apple-system, 'Segoe UI', sans-serif;
-  background: #0f0f1a;
+  width: 400px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
   color: #e0e0e0;
-  padding: 16px;
+  padding: 20px;
+  min-height: 300px;
 }
-.logo {
+.header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 16px;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
 }
-.logo-icon {
-  width: 32px; height: 32px;
-  background: linear-gradient(135deg, #a855f7, #ec4899);
-  border-radius: 8px;
+.logo {
+  width: 40px; height: 40px;
+  background: linear-gradient(135deg, #ff6b6b, #feca57);
+  border-radius: 10px;
   display: flex; align-items: center; justify-content: center;
-  font-size: 16px;
+  font-size: 20px;
 }
-.logo-text { font-size: 16px; font-weight: 600; }
-.field { margin-bottom: 12px; }
-.field label {
-  display: block;
-  font-size: 12px;
-  color: #888;
-  margin-bottom: 4px;
-}
-.field input {
-  width: 100%;
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 8px;
-  padding: 8px 10px;
-  color: #fff;
-  font-size: 13px;
-  font-family: monospace;
-  outline: none;
-}
-.field input:focus { border-color: #a855f7; }
+.title { font-size: 18px; font-weight: 600; }
+.subtitle { font-size: 12px; color: #888; margin-top: 2px; }
+
 .btn {
   width: 100%;
-  padding: 10px;
+  padding: 12px;
   border: none;
   border-radius: 10px;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
-  margin-top: 4px;
+  margin-bottom: 12px;
 }
 .btn-primary {
-  background: linear-gradient(135deg, #a855f7, #ec4899);
+  background: linear-gradient(135deg, #667eea, #764ba2);
   color: #fff;
 }
-.btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
-.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-.status {
-  margin-top: 12px;
-  padding: 8px 10px;
+.btn-primary:hover { transform: translateY(-2px); box-shadow: 0 4px 15px rgba(102,126,234,0.4); }
+.btn-success {
+  background: linear-gradient(135deg, #11998e, #38ef7d);
+  color: #fff;
+}
+.btn-success:hover { transform: translateY(-2px); box-shadow: 0 4px 15px rgba(17,153,142,0.4); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
+
+.section {
+  background: rgba(255,255,255,0.05);
+  border-radius: 12px;
+  padding: 15px;
+  margin-bottom: 15px;
+}
+.section-title {
+  font-size: 13px;
+  color: #888;
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.cookie-item {
+  background: rgba(0,0,0,0.2);
   border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 10px;
+  border-left: 3px solid #667eea;
+}
+.cookie-item.missing { border-left-color: #ef4444; }
+.cookie-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.cookie-name {
   font-size: 12px;
-  display: none;
+  font-weight: 600;
+  color: #667eea;
 }
-.status.ok { display: block; background: rgba(34,197,94,0.15); color: #22c55e; }
-.status.err { display: block; background: rgba(239,68,68,0.15); color: #ef4444; }
-.status.loading { display: block; background: rgba(168,85,247,0.15); color: #a855f7; }
-.cookies-preview {
-  margin-top: 12px;
-  padding: 8px;
-  background: rgba(255,255,255,0.03);
-  border-radius: 8px;
+.cookie-status {
   font-size: 11px;
-  font-family: monospace;
-  color: #666;
-  max-height: 80px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(34,197,94,0.2);
+  color: #22c55e;
+}
+.cookie-status.missing {
+  background: rgba(239,68,68,0.2);
+  color: #ef4444;
+}
+.cookie-value {
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: #aaa;
+  word-break: break-all;
+  background: rgba(0,0,0,0.3);
+  padding: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.cookie-value:hover {
+  background: rgba(102,126,234,0.2);
+  color: #fff;
+}
+.cookie-value.copied::after {
+  content: " ✓ 已复制";
+  color: #22c55e;
+}
+
+.config-output {
+  background: rgba(0,0,0,0.3);
+  border-radius: 8px;
+  padding: 12px;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: #a0aec0;
+  max-height: 150px;
   overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin-top: 10px;
+}
+
+.status {
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  text-align: center;
+  margin-bottom: 15px;
   display: none;
 }
-.cookies-preview.show { display: block; }
-.cookie-ok { color: #22c55e; }
-.cookie-miss { color: #ef4444; }
+.status.show { display: block; }
+.status.success { background: rgba(34,197,94,0.15); color: #22c55e; }
+.status.error { background: rgba(239,68,68,0.15); color: #ef4444; }
+.status.loading { background: rgba(102,126,234,0.15); color: #667eea; }
+
+.input-group {
+  margin-bottom: 10px;
+}
+.input-group label {
+  display: block;
+  font-size: 12px;
+  color: #888;
+  margin-bottom: 5px;
+}
+.input-group input {
+  width: 100%;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  padding: 10px;
+  color: #fff;
+  font-size: 13px;
+  outline: none;
+}
+.input-group input:focus { border-color: #667eea; }
+
+.hint {
+  font-size: 11px;
+  color: #666;
+  margin-top: 10px;
+  line-height: 1.5;
+}
+
+.accounts-list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+.account-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(255,255,255,0.05);
+  padding: 10px;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+.account-name { font-size: 13px; }
+.account-actions { display: flex; gap: 5px; }
+.icon-btn {
+  background: rgba(255,255,255,0.1);
+  border: none;
+  color: #fff;
+  padding: 5px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.icon-btn:hover { background: rgba(255,255,255,0.2); }
+.icon-btn.delete { background: rgba(239,68,68,0.3); }
+.icon-btn.delete:hover { background: rgba(239,68,68,0.5); }
 </style>
 </head>
 <body>
-  <div class="logo">
-    <div class="logo-icon">⚡</div>
-    <div class="logo-text">MiMo Free API Helper</div>
+  <div class="header">
+    <div class="logo">🍪</div>
+    <div>
+      <div class="title">MiMo Cookie 抓取器</div>
+      <div class="subtitle">一键获取 Cookie 配置</div>
+    </div>
   </div>
-
-  <div class="field">
-    <label>Gateway 地址</label>
-    <input id="gateway" type="text" value="http://localhost:8080" />
-  </div>
-
-  <div class="field">
-    <label>Gateway API Key</label>
-    <input id="apikey" type="password" value="sk-mimo" />
-  </div>
-
-  <button class="btn btn-primary" id="syncBtn">🔄 同步 Cookie 到 Gateway</button>
 
   <div class="status" id="status"></div>
-  <div class="cookies-preview" id="preview"></div>
+
+  <button class="btn btn-primary" id="grabBtn">🔍 抓取当前页面 Cookie</button>
+
+  <div class="section" id="cookieSection" style="display:none;">
+    <div class="section-title">抓取结果</div>
+    
+    <div class="cookie-item" id="serviceTokenItem">
+      <div class="cookie-header">
+        <span class="cookie-name">service_token</span>
+        <span class="cookie-status" id="serviceTokenStatus">✓ 找到</span>
+      </div>
+      <div class="cookie-value" id="serviceTokenValue" data-field="service_token">点击复制</div>
+    </div>
+
+    <div class="cookie-item" id="userIdItem">
+      <div class="cookie-header">
+        <span class="cookie-name">user_id</span>
+        <span class="cookie-status" id="userIdStatus">✓ 找到</span>
+      </div>
+      <div class="cookie-value" id="userIdValue" data-field="user_id">点击复制</div>
+    </div>
+
+    <div class="cookie-item" id="phItem">
+      <div class="cookie-header">
+        <span class="cookie-name">ph</span>
+        <span class="cookie-status" id="phStatus">✓ 找到</span>
+      </div>
+      <div class="cookie-value" id="phValue" data-field="ph">点击复制</div>
+    </div>
+  </div>
+
+  <div class="section" id="configSection" style="display:none;">
+    <div class="section-title">config.json 格式</div>
+    <div class="config-output" id="configOutput"></div>
+    <button class="btn btn-success" id="copyConfigBtn" style="margin-top:10px;">📋 复制完整配置</button>
+  </div>
+
+  <div class="section">
+    <div class="section-title">已保存账号</div>
+    <div class="accounts-list" id="accountsList"></div>
+    <button class="btn btn-primary" id="saveAccountBtn" style="display:none; margin-top:10px;">💾 保存此账号</button>
+    <button class="btn btn-success" id="exportAllBtn" style="margin-top:10px;">📤 导出全部配置</button>
+  </div>
+
+  <div class="hint">
+    💡 提示：在 MiMo 网页 (aistudio.xiaomimimo.com) 登录后，点击"抓取"按钮即可获取 Cookie
+  </div>
 
   <script src="popup.js"></script>
 </body>
