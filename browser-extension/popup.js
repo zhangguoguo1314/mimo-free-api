@@ -1,41 +1,48 @@
 document.addEventListener('DOMContentLoaded', () => {
+  // DOM 元素
   const grabBtn = document.getElementById('grabBtn');
-  const saveAccountBtn = document.getElementById('saveAccountBtn');
-  const copyConfigBtn = document.getElementById('copyConfigBtn');
-  const exportAllBtn = document.getElementById('exportAllBtn');
   const statusEl = document.getElementById('status');
-  const cookieSection = document.getElementById('cookieSection');
-  const configSection = document.getElementById('configSection');
-  const accountsList = document.getElementById('accountsList');
-  const configOutput = document.getElementById('configOutput');
+  const resultBox = document.getElementById('resultBox');
+  const quickCopy = document.getElementById('quickCopy');
+  const configPreview = document.getElementById('configPreview');
+  const copyConfigBtn = document.getElementById('copyConfigBtn');
+  const accountList = document.getElementById('accountList');
+  const accountCount = document.getElementById('accountCount');
+  const saveRow = document.getElementById('saveRow');
+  const accountName = document.getElementById('accountName');
+  const saveBtn = document.getElementById('saveBtn');
+  const exportAllBtn = document.getElementById('exportAllBtn');
 
+  // Cookie 显示元素
+  const serviceTokenVal = document.getElementById('serviceTokenVal');
+  const userIdVal = document.getElementById('userIdVal');
+  const phVal = document.getElementById('phVal');
+
+  // 状态
   let currentCookies = {};
   let savedAccounts = [];
 
-  // 加载已保存的账号
-  loadSavedAccounts();
+  // 初始化
+  loadAccounts();
 
+  // 抓取按钮
   grabBtn.addEventListener('click', async () => {
-    showStatus('loading', '🔍 正在抓取 Cookie...');
+    showStatus('loading', '正在抓取 Cookie...');
     grabBtn.disabled = true;
 
     try {
-      // 获取当前活动标签页
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       
       if (!tab.url.includes('xiaomimimo.com')) {
-        showStatus('error', '❌ 请先打开 MiMo 网页 (aistudio.xiaomimimo.com)');
+        showStatus('error', '请先打开 MiMo 网页 (aistudio.xiaomimimo.com)');
         grabBtn.disabled = false;
         return;
       }
 
-      // 获取所有 Cookie
-      const cookies = await chrome.cookies.getAll({ domain: '.xiaomimimo.com' });
+      // 获取 Cookie
       const allCookies = await chrome.cookies.getAll({});
-      
       currentCookies = {};
-      
-      // 搜索 MiMo 相关 Cookie
+
       for (const c of allCookies) {
         if (c.domain.includes('mimo') || c.domain.includes('xiaomi')) {
           if (c.name === 'serviceToken') {
@@ -51,33 +58,64 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       // 显示结果
-      displayCookies(currentCookies);
-      
-      const foundCount = Object.keys(currentCookies).length;
-      if (foundCount === 3) {
-        showStatus('success', '✅ 成功抓取全部 Cookie！');
-        saveAccountBtn.style.display = 'block';
-      } else if (foundCount > 0) {
-        showStatus('error', `⚠️ 只找到 ${foundCount}/3 个 Cookie，请确认已登录`);
-        saveAccountBtn.style.display = 'block';
+      displayResults(currentCookies);
+
+      const found = Object.keys(currentCookies).length;
+      if (found === 3) {
+        showStatus('success', '✓ 成功抓取全部 Cookie');
+        saveRow.style.display = 'flex';
+      } else if (found > 0) {
+        showStatus('error', `⚠ 只找到 ${found}/3 个 Cookie`);
+        saveRow.style.display = 'flex';
       } else {
-        showStatus('error', '❌ 未找到任何 Cookie，请确认已登录 MiMo');
+        showStatus('error', '✗ 未找到 Cookie，请确认已登录');
       }
 
     } catch (e) {
-      showStatus('error', `❌ 错误: ${e.message}`);
+      showStatus('error', '错误: ' + e.message);
     } finally {
       grabBtn.disabled = false;
     }
   });
 
-  // 保存账号
-  saveAccountBtn.addEventListener('click', () => {
-    const accountName = prompt('请输入账号名称（如：主账号、小号1）：', `账号${savedAccounts.length + 1}`);
-    if (!accountName) return;
+  // 单个复制按钮
+  document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const field = btn.dataset.field;
+      const value = currentCookies[field] || '';
+      if (value) {
+        copyToClipboard(value);
+        btn.textContent = '已复制';
+        btn.classList.add('copied');
+        setTimeout(() => {
+          btn.textContent = '复制';
+          btn.classList.remove('copied');
+        }, 1500);
+      }
+    });
+  });
 
+  // 一键复制完整配置
+  copyConfigBtn.addEventListener('click', () => {
+    const config = generateConfig([{
+      id: accountName.value.trim() || '账号' + (savedAccounts.length + 1),
+      ...currentCookies,
+      active: true
+    }]);
+    copyToClipboard(JSON.stringify(config, null, 2));
+    
+    copyConfigBtn.textContent = '✓ 已复制到剪贴板';
+    setTimeout(() => {
+      copyConfigBtn.textContent = '一键复制完整配置';
+    }, 2000);
+  });
+
+  // 保存账号
+  saveBtn.addEventListener('click', () => {
+    const name = accountName.value.trim() || '账号' + (savedAccounts.length + 1);
+    
     const account = {
-      id: accountName,
+      id: name,
       service_token: currentCookies.service_token || '',
       user_id: currentCookies.user_id || '',
       ph: currentCookies.ph || '',
@@ -87,79 +125,65 @@ document.addEventListener('DOMContentLoaded', () => {
     savedAccounts.push(account);
     chrome.storage.local.set({ accounts: savedAccounts });
     
-    loadSavedAccounts();
-    showStatus('success', `✅ 账号 "${accountName}" 已保存！`);
+    loadAccounts();
+    accountName.value = '';
+    showStatus('success', `✓ 账号 "${name}" 已保存`);
   });
 
-  // 复制单个字段
-  document.querySelectorAll('.cookie-value').forEach(el => {
-    el.addEventListener('click', () => {
-      const value = el.textContent;
-      if (value && value !== '点击复制' && !value.includes('未找到')) {
-        copyToClipboard(value);
-        el.classList.add('copied');
-        setTimeout(() => el.classList.remove('copied'), 2000);
-      }
-    });
-  });
-
-  // 复制完整配置
-  copyConfigBtn.addEventListener('click', () => {
-    const config = generateConfig([{
-      id: 'account-1',
-      ...currentCookies,
-      active: true
-    }]);
-    copyToClipboard(JSON.stringify(config, null, 2));
-    showStatus('success', '✅ 配置已复制到剪贴板！');
-  });
-
-  // 导出全部账号
+  // 导出全部
   exportAllBtn.addEventListener('click', () => {
     if (savedAccounts.length === 0) {
-      showStatus('error', '❌ 没有保存的账号');
+      showStatus('error', '没有保存的账号');
       return;
     }
     
     const config = generateConfig(savedAccounts);
     copyToClipboard(JSON.stringify(config, null, 2));
-    showStatus('success', `✅ ${savedAccounts.length} 个账号配置已复制！`);
+    showStatus('success', `✓ ${savedAccounts.length} 个账号配置已复制`);
   });
 
-  function displayCookies(cookies) {
-    cookieSection.style.display = 'block';
-    configSection.style.display = 'block';
+  // 显示抓取结果
+  function displayResults(cookies) {
+    resultBox.classList.add('show');
+    quickCopy.classList.add('show');
 
     // service_token
-    const hasServiceToken = !!cookies.service_token;
-    document.getElementById('serviceTokenItem').className = hasServiceToken ? 'cookie-item' : 'cookie-item missing';
-    document.getElementById('serviceTokenStatus').className = hasServiceToken ? 'cookie-status' : 'cookie-status missing';
-    document.getElementById('serviceTokenStatus').textContent = hasServiceToken ? '✓ 找到' : '✗ 未找到';
-    document.getElementById('serviceTokenValue').textContent = cookies.service_token || '未找到 - 请确认已登录';
+    if (cookies.service_token) {
+      serviceTokenVal.textContent = cookies.service_token.substring(0, 20) + '...';
+      serviceTokenVal.className = 'cookie-value ok';
+    } else {
+      serviceTokenVal.textContent = '未找到';
+      serviceTokenVal.className = 'cookie-value miss';
+    }
 
     // user_id
-    const hasUserId = !!cookies.user_id;
-    document.getElementById('userIdItem').className = hasUserId ? 'cookie-item' : 'cookie-item missing';
-    document.getElementById('userIdStatus').className = hasUserId ? 'cookie-status' : 'cookie-status missing';
-    document.getElementById('userIdStatus').textContent = hasUserId ? '✓ 找到' : '✗ 未找到';
-    document.getElementById('userIdValue').textContent = cookies.user_id || '未找到 - 请确认已登录';
+    if (cookies.user_id) {
+      userIdVal.textContent = cookies.user_id;
+      userIdVal.className = 'cookie-value ok';
+    } else {
+      userIdVal.textContent = '未找到';
+      userIdVal.className = 'cookie-value miss';
+    }
 
     // ph
-    const hasPh = !!cookies.ph;
-    document.getElementById('phItem').className = hasPh ? 'cookie-item' : 'cookie-item missing';
-    document.getElementById('phStatus').className = hasPh ? 'cookie-status' : 'cookie-status missing';
-    document.getElementById('phStatus').textContent = hasPh ? '✓ 找到' : '✗ 未找到';
-    document.getElementById('phValue').textContent = cookies.ph || '未找到 - 请确认已登录';
+    if (cookies.ph) {
+      phVal.textContent = cookies.ph.substring(0, 20) + '...';
+      phVal.className = 'cookie-value ok';
+    } else {
+      phVal.textContent = '未找到';
+      phVal.className = 'cookie-value miss';
+    }
 
-    // 生成配置预览
+    // 更新配置预览
     const config = generateConfig([{
-      id: 'account-1',
+      id: '示例账号',
       ...cookies,
       active: true
     }]);
-    configOutput.textContent = JSON.stringify(config, null, 2);
+    configPreview.textContent = JSON.stringify(config, null, 2);
   }
 
+  // 生成配置
   function generateConfig(accounts) {
     return {
       port: "7860",
@@ -175,54 +199,56 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 
-  function loadSavedAccounts() {
+  // 加载账号列表
+  function loadAccounts() {
     chrome.storage.local.get(['accounts'], (data) => {
       savedAccounts = data.accounts || [];
-      renderAccountsList();
+      renderAccounts();
     });
   }
 
-  function renderAccountsList() {
+  // 渲染账号列表
+  function renderAccounts() {
+    accountCount.textContent = savedAccounts.length;
+    
     if (savedAccounts.length === 0) {
-      accountsList.innerHTML = '<div style="color:#666; font-size:12px; text-align:center; padding:20px;">暂无保存的账号</div>';
+      accountList.innerHTML = '<div style="color:#666;font-size:12px;text-align:center;padding:15px;">暂无保存的账号</div>';
       return;
     }
 
-    accountsList.innerHTML = savedAccounts.map((acc, index) => `
+    accountList.innerHTML = savedAccounts.map((acc, idx) => `
       <div class="account-item">
         <span class="account-name">${acc.id}</span>
-        <div class="account-actions">
-          <button class="icon-btn" data-index="${index}" data-action="copy">复制</button>
-          <button class="icon-btn delete" data-index="${index}" data-action="delete">删除</button>
+        <div class="account-btns">
+          <button class="small-btn" data-idx="${idx}" data-action="copy">复制</button>
+          <button class="small-btn del" data-idx="${idx}" data-action="del">删除</button>
         </div>
       </div>
     `).join('');
 
     // 绑定按钮事件
-    accountsList.querySelectorAll('.icon-btn').forEach(btn => {
+    accountList.querySelectorAll('.small-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
-        const index = parseInt(e.target.dataset.index);
+        const idx = parseInt(e.target.dataset.idx);
         const action = e.target.dataset.action;
         
         if (action === 'copy') {
-          const config = generateConfig([savedAccounts[index]]);
+          const config = generateConfig([savedAccounts[idx]]);
           copyToClipboard(JSON.stringify(config, null, 2));
-          showStatus('success', `✅ "${savedAccounts[index].id}" 配置已复制！`);
-        } else if (action === 'delete') {
-          if (confirm(`确定删除账号 "${savedAccounts[index].id}" 吗？`)) {
-            savedAccounts.splice(index, 1);
-            chrome.storage.local.set({ accounts: savedAccounts });
-            loadSavedAccounts();
-            showStatus('success', '✅ 账号已删除');
-          }
+          showStatus('success', `✓ "${savedAccounts[idx].id}" 配置已复制`);
+        } else if (action === 'del') {
+          savedAccounts.splice(idx, 1);
+          chrome.storage.local.set({ accounts: savedAccounts });
+          renderAccounts();
+          showStatus('success', '✓ 账号已删除');
         }
       });
     });
   }
 
+  // 复制到剪贴板
   function copyToClipboard(text) {
     navigator.clipboard.writeText(text).catch(() => {
-      // 降级方案
       const input = document.createElement('textarea');
       input.value = text;
       document.body.appendChild(input);
@@ -232,14 +258,15 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function showStatus(type, message) {
-    statusEl.className = `status ${type} show`;
-    statusEl.textContent = message;
+  // 显示状态
+  function showStatus(type, msg) {
+    statusEl.className = 'status ' + type + ' show';
+    statusEl.textContent = msg;
     
     if (type !== 'loading') {
       setTimeout(() => {
         statusEl.className = 'status';
-      }, 3000);
+      }, 2500);
     }
   }
 });

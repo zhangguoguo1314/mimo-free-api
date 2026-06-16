@@ -5,36 +5,35 @@
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
-  width: 400px;
+  width: 360px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  background: #1a1a2e;
   color: #e0e0e0;
-  padding: 20px;
-  min-height: 300px;
+  padding: 16px;
 }
+
 .header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 20px;
-  padding-bottom: 15px;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
   border-bottom: 1px solid rgba(255,255,255,0.1);
 }
 .logo {
-  width: 40px; height: 40px;
+  width: 36px; height: 36px;
   background: linear-gradient(135deg, #ff6b6b, #feca57);
-  border-radius: 10px;
+  border-radius: 8px;
   display: flex; align-items: center; justify-content: center;
-  font-size: 20px;
+  font-size: 18px;
 }
-.title { font-size: 18px; font-weight: 600; }
-.subtitle { font-size: 12px; color: #888; margin-top: 2px; }
+.title { font-size: 16px; font-weight: 600; }
 
 .btn {
   width: 100%;
   padding: 12px;
   border: none;
-  border-radius: 10px;
+  border-radius: 8px;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -45,219 +44,246 @@ body {
   background: linear-gradient(135deg, #667eea, #764ba2);
   color: #fff;
 }
-.btn-primary:hover { transform: translateY(-2px); box-shadow: 0 4px 15px rgba(102,126,234,0.4); }
+.btn-primary:hover { opacity: 0.9; }
 .btn-success {
   background: linear-gradient(135deg, #11998e, #38ef7d);
   color: #fff;
 }
-.btn-success:hover { transform: translateY(-2px); box-shadow: 0 4px 15px rgba(17,153,142,0.4); }
-.btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
-
-.section {
-  background: rgba(255,255,255,0.05);
-  border-radius: 12px;
-  padding: 15px;
-  margin-bottom: 15px;
-}
-.section-title {
-  font-size: 13px;
-  color: #888;
-  margin-bottom: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.cookie-item {
-  background: rgba(0,0,0,0.2);
-  border-radius: 8px;
-  padding: 12px;
-  margin-bottom: 10px;
-  border-left: 3px solid #667eea;
-}
-.cookie-item.missing { border-left-color: #ef4444; }
-.cookie-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-.cookie-name {
-  font-size: 12px;
-  font-weight: 600;
-  color: #667eea;
-}
-.cookie-status {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  background: rgba(34,197,94,0.2);
-  color: #22c55e;
-}
-.cookie-status.missing {
-  background: rgba(239,68,68,0.2);
-  color: #ef4444;
-}
-.cookie-value {
-  font-family: 'Courier New', monospace;
-  font-size: 11px;
-  color: #aaa;
-  word-break: break-all;
-  background: rgba(0,0,0,0.3);
-  padding: 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.cookie-value:hover {
-  background: rgba(102,126,234,0.2);
-  color: #fff;
-}
-.cookie-value.copied::after {
-  content: " ✓ 已复制";
-  color: #22c55e;
-}
-
-.config-output {
-  background: rgba(0,0,0,0.3);
-  border-radius: 8px;
-  padding: 12px;
-  font-family: 'Courier New', monospace;
-  font-size: 11px;
-  color: #a0aec0;
-  max-height: 150px;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
-  margin-top: 10px;
-}
+.btn-success:hover { opacity: 0.9; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .status {
   padding: 10px;
-  border-radius: 8px;
+  border-radius: 6px;
   font-size: 13px;
   text-align: center;
-  margin-bottom: 15px;
+  margin-bottom: 12px;
   display: none;
 }
 .status.show { display: block; }
-.status.success { background: rgba(34,197,94,0.15); color: #22c55e; }
-.status.error { background: rgba(239,68,68,0.15); color: #ef4444; }
+.status.ok { background: rgba(34,197,94,0.15); color: #22c55e; }
+.status.err { background: rgba(239,68,68,0.15); color: #ef4444; }
 .status.loading { background: rgba(102,126,234,0.15); color: #667eea; }
 
-.input-group {
-  margin-bottom: 10px;
+/* Cookie 结果区域 */
+.result-box {
+  background: rgba(255,255,255,0.05);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+  display: none;
 }
-.input-group label {
-  display: block;
+.result-box.show { display: block; }
+
+.cookie-row {
+  display: flex;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.cookie-row:last-child { border-bottom: none; }
+
+.cookie-label {
+  width: 100px;
   font-size: 12px;
   color: #888;
-  margin-bottom: 5px;
 }
-.input-group input {
-  width: 100%;
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 8px;
-  padding: 10px;
-  color: #fff;
-  font-size: 13px;
-  outline: none;
-}
-.input-group input:focus { border-color: #667eea; }
 
-.hint {
+.cookie-value-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cookie-value {
+  flex: 1;
+  font-family: monospace;
   font-size: 11px;
-  color: #666;
-  margin-top: 10px;
-  line-height: 1.5;
+  color: #a0aec0;
+  background: rgba(0,0,0,0.3);
+  padding: 6px 10px;
+  border-radius: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cookie-value.ok { color: #22c55e; }
+.cookie-value.miss { color: #ef4444; }
+
+.copy-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  background: rgba(255,255,255,0.1);
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+}
+.copy-btn:hover { background: rgba(255,255,255,0.2); }
+.copy-btn.copied { background: rgba(34,197,94,0.3); }
+
+/* 一键复制区域 */
+.quick-copy {
+  background: linear-gradient(135deg, rgba(102,126,234,0.2), rgba(118,75,162,0.2));
+  border: 1px solid rgba(102,126,234,0.3);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+  display: none;
+}
+.quick-copy.show { display: block; }
+
+.quick-copy-title {
+  font-size: 12px;
+  color: #667eea;
+  margin-bottom: 8px;
+  font-weight: 600;
 }
 
-.accounts-list {
-  max-height: 200px;
+.config-preview {
+  background: rgba(0,0,0,0.3);
+  border-radius: 6px;
+  padding: 10px;
+  font-family: monospace;
+  font-size: 10px;
+  color: #a0aec0;
+  max-height: 100px;
   overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin-bottom: 10px;
 }
+
+/* 账号管理 */
+.section-title {
+  font-size: 12px;
+  color: #888;
+  margin-bottom: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.account-list {
+  max-height: 120px;
+  overflow-y: auto;
+  margin-bottom: 10px;
+}
+
 .account-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
   background: rgba(255,255,255,0.05);
-  padding: 10px;
-  border-radius: 8px;
-  margin-bottom: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  font-size: 13px;
 }
-.account-name { font-size: 13px; }
-.account-actions { display: flex; gap: 5px; }
-.icon-btn {
+
+.account-name { color: #e0e0e0; }
+
+.account-btns {
+  display: flex;
+  gap: 4px;
+}
+
+.small-btn {
+  padding: 4px 8px;
+  font-size: 11px;
   background: rgba(255,255,255,0.1);
   border: none;
+  border-radius: 4px;
   color: #fff;
-  padding: 5px 10px;
-  border-radius: 5px;
   cursor: pointer;
-  font-size: 12px;
 }
-.icon-btn:hover { background: rgba(255,255,255,0.2); }
-.icon-btn.delete { background: rgba(239,68,68,0.3); }
-.icon-btn.delete:hover { background: rgba(239,68,68,0.5); }
+.small-btn:hover { background: rgba(255,255,255,0.2); }
+.small-btn.del { background: rgba(239,68,68,0.3); }
+.small-btn.del:hover { background: rgba(239,68,68,0.5); }
+
+.input-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.input-row input {
+  flex: 1;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #fff;
+  font-size: 13px;
+  outline: none;
+}
+.input-row input:focus { border-color: #667eea; }
+
+.hint {
+  font-size: 11px;
+  color: #666;
+  text-align: center;
+  margin-top: 8px;
+}
 </style>
 </head>
 <body>
   <div class="header">
     <div class="logo">🍪</div>
-    <div>
-      <div class="title">MiMo Cookie 抓取器</div>
-      <div class="subtitle">一键获取 Cookie 配置</div>
-    </div>
+    <div class="title">MiMo Cookie 抓取器</div>
   </div>
 
   <div class="status" id="status"></div>
 
   <button class="btn btn-primary" id="grabBtn">🔍 抓取当前页面 Cookie</button>
 
-  <div class="section" id="cookieSection" style="display:none;">
-    <div class="section-title">抓取结果</div>
-    
-    <div class="cookie-item" id="serviceTokenItem">
-      <div class="cookie-header">
-        <span class="cookie-name">service_token</span>
-        <span class="cookie-status" id="serviceTokenStatus">✓ 找到</span>
+  <!-- Cookie 详情 -->
+  <div class="result-box" id="resultBox">
+    <div class="cookie-row">
+      <div class="cookie-label">service_token</div>
+      <div class="cookie-value-wrap">
+        <div class="cookie-value" id="serviceTokenVal">未找到</div>
+        <button class="copy-btn" data-field="service_token">复制</button>
       </div>
-      <div class="cookie-value" id="serviceTokenValue" data-field="service_token">点击复制</div>
     </div>
-
-    <div class="cookie-item" id="userIdItem">
-      <div class="cookie-header">
-        <span class="cookie-name">user_id</span>
-        <span class="cookie-status" id="userIdStatus">✓ 找到</span>
+    <div class="cookie-row">
+      <div class="cookie-label">user_id</div>
+      <div class="cookie-value-wrap">
+        <div class="cookie-value" id="userIdVal">未找到</div>
+        <button class="copy-btn" data-field="user_id">复制</button>
       </div>
-      <div class="cookie-value" id="userIdValue" data-field="user_id">点击复制</div>
     </div>
-
-    <div class="cookie-item" id="phItem">
-      <div class="cookie-header">
-        <span class="cookie-name">ph</span>
-        <span class="cookie-status" id="phStatus">✓ 找到</span>
+    <div class="cookie-row">
+      <div class="cookie-label">ph</div>
+      <div class="cookie-value-wrap">
+        <div class="cookie-value" id="phVal">未找到</div>
+        <button class="copy-btn" data-field="ph">复制</button>
       </div>
-      <div class="cookie-value" id="phValue" data-field="ph">点击复制</div>
     </div>
   </div>
 
-  <div class="section" id="configSection" style="display:none;">
-    <div class="section-title">config.json 格式</div>
-    <div class="config-output" id="configOutput"></div>
-    <button class="btn btn-success" id="copyConfigBtn" style="margin-top:10px;">📋 复制完整配置</button>
+  <!-- 一键复制配置 -->
+  <div class="quick-copy" id="quickCopy">
+    <div class="quick-copy-title">📋 config.json 配置预览</div>
+    <div class="config-preview" id="configPreview"></div>
+    <button class="btn btn-success" id="copyConfigBtn">一键复制完整配置</button>
   </div>
 
-  <div class="section">
-    <div class="section-title">已保存账号</div>
-    <div class="accounts-list" id="accountsList"></div>
-    <button class="btn btn-primary" id="saveAccountBtn" style="display:none; margin-top:10px;">💾 保存此账号</button>
-    <button class="btn btn-success" id="exportAllBtn" style="margin-top:10px;">📤 导出全部配置</button>
+  <!-- 账号管理 -->
+  <div class="section-title">
+    <span>已保存账号 (<span id="accountCount">0</span>)</span>
+    <button class="small-btn" id="exportAllBtn">导出全部</button>
+  </div>
+  
+  <div class="account-list" id="accountList"></div>
+  
+  <div class="input-row" id="saveRow" style="display:none;">
+    <input type="text" id="accountName" placeholder="输入账号名称（如：主账号）" />
+    <button class="small-btn" id="saveBtn" style="background:#667eea;">保存</button>
   </div>
 
-  <div class="hint">
-    💡 提示：在 MiMo 网页 (aistudio.xiaomimimo.com) 登录后，点击"抓取"按钮即可获取 Cookie
-  </div>
+  <div class="hint">在 MiMo 网页登录后，点击上方按钮抓取 Cookie</div>
 
   <script src="popup.js"></script>
 </body>
