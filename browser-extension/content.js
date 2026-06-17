@@ -92,6 +92,17 @@ function parseAndStoreCookies(cookieStr) {
   }
 }
 
+// 去除值两端的引号
+function stripQuotes(value) {
+  if (!value) return value;
+  value = value.trim();
+  if ((value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
 // 监听来自background的消息
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'GRAB_COOKIES') {
@@ -128,6 +139,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     // 填充缺失的值
     if (!result.ph && result.localStorage.ph) result.ph = result.localStorage.ph;
     if (!result.userId && result.localStorage.userId) result.userId = result.localStorage.userId;
+
+    // 去除所有值的引号
+    result.serviceToken = stripQuotes(result.serviceToken);
+    result.ph = stripQuotes(result.ph);
+    result.userId = stripQuotes(result.userId);
+    if (result.localStorage.ph) result.localStorage.ph = stripQuotes(result.localStorage.ph);
+    if (result.localStorage.userId) result.localStorage.userId = stripQuotes(result.localStorage.userId);
 
     sendResponse(result);
     return true;

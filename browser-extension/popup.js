@@ -59,10 +59,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       const response = await chrome.tabs.sendMessage(tab.id, { action: 'GRAB_COOKIES' });
 
       if (response) {
+        // 辅助函数：去除引号
+        const stripQuotes = (v) => {
+          if (!v) return v;
+          v = v.trim();
+          if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+            return v.slice(1, -1);
+          }
+          return v;
+        };
+
         const cookies = {
-          serviceToken: response.serviceToken || '',
-          ph: response.ph || response.localStorage?.ph || '',
-          userId: response.userId || response.localStorage?.userId || ''
+          serviceToken: stripQuotes(response.serviceToken) || '',
+          ph: stripQuotes(response.ph || response.localStorage?.ph) || '',
+          userId: stripQuotes(response.userId || response.localStorage?.userId) || ''
         };
 
         await chrome.storage.local.set({
