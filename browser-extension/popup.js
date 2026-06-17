@@ -1,117 +1,82 @@
-document.addEventListener('DOMContentLoaded', () => {
-  const grabBtn = document.getElementById('grabBtn');
+// 从storage读取捕获的cookie
+async function getCookies() {
+  const result = await chrome.storage.local.get(['mimoCookies', 'capturedAt']);
+  return result;
+}
+
+// 显示状态
+function showStatus(message, isError = false) {
   const statusEl = document.getElementById('status');
-  const resultBox = document.getElementById('resultBox');
-  const configSection = document.getElementById('configSection');
-  const configOutput = document.getElementById('configOutput');
-  const copyConfigBtn = document.getElementById('copyConfigBtn');
-  const serviceTokenVal = document.getElementById('serviceTokenVal');
-  const userIdVal = document.getElementById('userIdVal');
-  const phVal = document.getElementById('phVal');
+  statusEl.textContent = message;
+  statusEl.className = 'status ' + (isError ? 'error' : 'success');
+}
 
-  let currentCookies = {};
+// 更新UI
+document.addEventListener('DOMContentLoaded', async () => {
+  const uidEl = document.getElementById('uid');
+  const tokenEl = document.getElementById('token');
+  const phEl = document.getElementById('ph');
+  const timeEl = document.getElementById('captureTime');
+  const copyBtn = document.getElementById('copyBtn');
+  const refreshBtn = document.getElementById('refreshBtn');
 
-  grabBtn.addEventListener('click', async () => {
-    showStatus('loading', '正在抓取...');
-    grabBtn.disabled = true;
+  // 加载已保存的cookie
+  async function loadCookies() {
+    const { mimoCookies, capturedAt } = await getCookies();
 
-    try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      
-      if (!tab.url.includes('xiaomimimo.com')) {
-        showStatus('error', '请先打开 MiMo 网页');
-        grabBtn.disabled = false;
-        return;
-      }
-
-      // 注入脚本读取 document.cookie
-      const results = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: () => {
-          const cookies = document.cookie;
-          const result = {};
-          if (cookies) {
-            cookies.split(';').forEach(pair => {
-              const [name, ...valueParts] = pair.trim().split('=');
-              const value = valueParts.join('=');
-              if (name === 'serviceToken') result.service_token = value;
-              if (name === 'userId') result.user_id = value;
-              if (name === 'xiaomichatbot_ph') result.ph = value;
-            });
-          }
-          return result;
-        }
-      });
-
-      currentCookies = results[0]?.result || {};
-      displayResults(currentCookies);
-
-      const found = Object.keys(currentCookies).length;
-      if (found === 3) {
-        showStatus('success', '✓ 抓取成功');
-      } else if (found > 0) {
-        showStatus('error', `⚠ 只找到 ${found}/3，请发送消息后再试`);
-      } else {
-        showStatus('error', '✗ 未找到，请发送消息后再试');
-      }
-
-    } catch (e) {
-      showStatus('error', '错误: ' + e.message);
-    } finally {
-      grabBtn.disabled = false;
+    if (mimoCookies) {
+      uidEl.textContent = mimoCookies.userId || '未捕获';
+      tokenEl.textContent = mimoCookies.serviceToken ? mimoCookies.serviceToken.substring(0, 30) + '...' : '未捕获';
+      phEl.textContent = mimoCookies.ph ? mimoCookies.ph.substring(0, 30) + '...' : '未捕获';
+      timeEl.textContent = '捕获时间: ' + (capturedAt || '未知');
+      showStatus('✅ 已获取Cookie');
+    } else {
+      uidEl.textContent = '-';
+      tokenEl.textContent = '-';
+      phEl.textContent = '-';
+      timeEl.textContent = '请在 MiMo 网站发送消息以捕获Cookie';
+      showStatus('⏳ 等待捕获...', true);
     }
+  }
+
+  // 刷新按钮
+  refreshBtn.addEventListener('click', () => {
+    loadCookies();
   });
 
-  function displayResults(cookies) {
-    resultBox.classList.add('show');
-    configSection.classList.add('show');
+  // 复制配置按钮
+  copyBtn.addEventListener('click', async () => {
+    const { mimoCookies } = await getCookies();
 
-    serviceTokenVal.textContent = cookies.service_token ? cookies.service_token.substring(0, 25) + '...' : '未找到';
-    serviceTokenVal.className = 'cookie-value ' + (cookies.service_token ? 'ok' : 'miss');
-
-    userIdVal.textContent = cookies.user_id || '未找到';
-    userIdVal.className = 'cookie-value ' + (cookies.user_id ? 'ok' : 'miss');
-
-    phVal.textContent = cookies.ph ? cookies.ph.substring(0, 25) + '...' : '未找到';
-    phVal.className = 'cookie-value ' + (cookies.ph ? 'ok' : 'miss');
+    if (!mimoCookies || !mimoCookies.serviceToken) {
+      showStatus('❌ 没有可复制的数据', true);
+      return;
+    }
 
     const config = {
       accounts: [{
-        id: 'my-account',
-        service_token: cookies.service_token || '',
-        user_id: cookies.user_id || '',
-        ph: cookies.ph || '',
+        id: `account-${Date.now()}`,
+        service_token: mimoCookies.serviceToken,
+        user_id: mimoCookies.userId,
+        ph: mimoCookies.ph,
         active: true
       }]
     };
-    configOutput.textContent = JSON.stringify(config, null, 2);
-  }
 
-  // 复制按钮
-  document.querySelectorAll('.copy-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const field = btn.dataset.field;
-      const value = currentCookies[field] || '';
-      if (value) {
-        navigator.clipboard.writeText(value);
-        btn.textContent = '已复制';
-        setTimeout(() => btn.textContent = '复制', 1500);
-      }
-    });
-  });
+    const jsonStr = JSON.stringify(config, null, 2);
 
-  // 复制完整配置
-  copyConfigBtn.addEventListener('click', () => {
-    navigator.clipboard.writeText(configOutput.textContent);
-    copyConfigBtn.textContent = '✓ 已复制';
-    setTimeout(() => copyConfigBtn.textContent = '一键复制', 2000);
-  });
-
-  function showStatus(type, msg) {
-    statusEl.className = 'status ' + type + ' show';
-    statusEl.textContent = msg;
-    if (type !== 'loading') {
-      setTimeout(() => statusEl.className = 'status', 3000);
+    try {
+      await navigator.clipboard.writeText(jsonStr);
+      showStatus('✅ 配置已复制到剪贴板');
+      copyBtn.textContent = '已复制!';
+      setTimeout(() => {
+        copyBtn.textContent = '复制配置';
+      }, 2000);
+    } catch (err) {
+      showStatus('❌ 复制失败', true);
     }
-  }
+  });
+
+  // 初始加载
+  loadCookies();
 });
