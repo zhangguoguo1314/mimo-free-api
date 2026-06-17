@@ -142,7 +142,7 @@ func testAccountValidity(acc *config.Account) bool {
 
 	// 设置 Cookie
 	cookie := fmt.Sprintf("serviceToken=%s; userId=%s; xiaomichatbot_ph=%s",
-		acc.ServiceToken, acc.UserID, acc.PH)
+		acc.ServiceToken, acc.UserID, acc.Ph)
 	req.Header.Set("Cookie", cookie)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.0")
 
