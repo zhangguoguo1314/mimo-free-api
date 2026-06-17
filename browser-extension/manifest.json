@@ -1,22 +1,15 @@
 {
   "manifest_version": 3,
   "name": "MiMo Cookie 抓取器",
-  "version": "1.4.0",
-  "description": "一键抓取 MiMo Cookie，支持多账号管理和批量导出",
+  "version": "2.0.0",
+  "description": "一键抓取 MiMo Cookie",
   "permissions": [
-    "cookies",
     "activeTab",
-    "storage",
-    "scripting",
-    "webRequest"
+    "scripting"
   ],
   "host_permissions": [
-    "https://*.xiaomimimo.com/*",
-    "https://*.xiaomi.com/*"
+    "https://aistudio.xiaomimimo.com/*"
   ],
-  "background": {
-    "service_worker": "background.js"
-  },
   "action": {
     "default_popup": "popup.html",
     "default_icon": {

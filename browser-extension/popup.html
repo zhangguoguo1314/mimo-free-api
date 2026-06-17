@@ -11,7 +11,6 @@ body {
   color: #e0e0e0;
   padding: 16px;
 }
-
 .header {
   display: flex;
   align-items: center;
@@ -28,7 +27,6 @@ body {
   font-size: 18px;
 }
 .title { font-size: 16px; font-weight: 600; }
-
 .btn {
   width: 100%;
   padding: 12px;
@@ -44,19 +42,11 @@ body {
   background: linear-gradient(135deg, #667eea, #764ba2);
   color: #fff;
 }
-.btn-primary:hover { opacity: 0.9; }
 .btn-success {
   background: linear-gradient(135deg, #11998e, #38ef7d);
   color: #fff;
 }
-.btn-success:hover { opacity: 0.9; }
-.btn-warning {
-  background: linear-gradient(135deg, #f093fb, #f5576c);
-  color: #fff;
-}
-.btn-warning:hover { opacity: 0.9; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
 .status {
   padding: 10px;
   border-radius: 6px;
@@ -68,10 +58,6 @@ body {
 .status.show { display: block; }
 .status.ok { background: rgba(34,197,94,0.15); color: #22c55e; }
 .status.err { background: rgba(239,68,68,0.15); color: #ef4444; }
-.status.loading { background: rgba(102,126,234,0.15); color: #667eea; }
-.status.warn { background: rgba(245,158,11,0.15); color: #f59e0b; }
-
-/* Cookie 结果区域 */
 .result-box {
   background: rgba(255,255,255,0.05);
   border-radius: 10px;
@@ -80,7 +66,6 @@ body {
   display: none;
 }
 .result-box.show { display: block; }
-
 .cookie-row {
   display: flex;
   align-items: center;
@@ -88,20 +73,8 @@ body {
   border-bottom: 1px solid rgba(255,255,255,0.05);
 }
 .cookie-row:last-child { border-bottom: none; }
-
-.cookie-label {
-  width: 100px;
-  font-size: 12px;
-  color: #888;
-}
-
-.cookie-value-wrap {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
+.cookie-label { width: 100px; font-size: 12px; color: #888; }
+.cookie-value-wrap { flex: 1; display: flex; align-items: center; gap: 8px; }
 .cookie-value {
   flex: 1;
   font-family: monospace;
@@ -116,7 +89,6 @@ body {
 }
 .cookie-value.ok { color: #22c55e; }
 .cookie-value.miss { color: #ef4444; }
-
 .copy-btn {
   padding: 4px 10px;
   font-size: 11px;
@@ -126,10 +98,6 @@ body {
   color: #fff;
   cursor: pointer;
 }
-.copy-btn:hover { background: rgba(255,255,255,0.2); }
-.copy-btn.copied { background: rgba(34,197,94,0.3); }
-
-/* 配置输出区域 */
 .config-section {
   background: linear-gradient(135deg, rgba(102,126,234,0.2), rgba(118,75,162,0.2));
   border: 1px solid rgba(102,126,234,0.3);
@@ -139,14 +107,7 @@ body {
   display: none;
 }
 .config-section.show { display: block; }
-
-.config-title {
-  font-size: 12px;
-  color: #667eea;
-  margin-bottom: 8px;
-  font-weight: 600;
-}
-
+.config-title { font-size: 12px; color: #667eea; margin-bottom: 8px; font-weight: 600; }
 .config-output {
   background: rgba(0,0,0,0.3);
   border-radius: 6px;
@@ -160,89 +121,7 @@ body {
   word-break: break-all;
   margin-bottom: 10px;
 }
-
-/* 账号管理 */
-.section-title {
-  font-size: 12px;
-  color: #888;
-  margin-bottom: 8px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.account-list {
-  max-height: 100px;
-  overflow-y: auto;
-  margin-bottom: 10px;
-}
-
-.account-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: rgba(255,255,255,0.05);
-  padding: 8px 10px;
-  border-radius: 6px;
-  margin-bottom: 6px;
-  font-size: 13px;
-}
-
-.account-name { color: #e0e0e0; }
-
-.account-btns {
-  display: flex;
-  gap: 4px;
-}
-
-.small-btn {
-  padding: 4px 8px;
-  font-size: 11px;
-  background: rgba(255,255,255,0.1);
-  border: none;
-  border-radius: 4px;
-  color: #fff;
-  cursor: pointer;
-}
-.small-btn:hover { background: rgba(255,255,255,0.2); }
-.small-btn.del { background: rgba(239,68,68,0.3); }
-.small-btn.del:hover { background: rgba(239,68,68,0.5); }
-
-.input-row {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.input-row input {
-  flex: 1;
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 6px;
-  padding: 8px 10px;
-  color: #fff;
-  font-size: 13px;
-  outline: none;
-}
-.input-row input:focus { border-color: #667eea; }
-
-.hint {
-  font-size: 11px;
-  color: #666;
-  text-align: center;
-  margin-top: 8px;
-}
-
-.test-result {
-  margin-top: 8px;
-  padding: 8px;
-  border-radius: 6px;
-  font-size: 12px;
-  display: none;
-}
-.test-result.show { display: block; }
-.test-result.ok { background: rgba(34,197,94,0.15); color: #22c55e; }
-.test-result.err { background: rgba(239,68,68,0.15); color: #ef4444; }
+.hint { font-size: 11px; color: #666; text-align: center; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -250,12 +129,8 @@ body {
     <div class="logo">🍪</div>
     <div class="title">MiMo Cookie 抓取器</div>
   </div>
-
   <div class="status" id="status"></div>
-
-  <button class="btn btn-primary" id="grabBtn">🔍 抓取当前页面 Cookie</button>
-
-  <!-- Cookie 详情 -->
+  <button class="btn btn-primary" id="grabBtn">🔍 抓取 Cookie</button>
   <div class="result-box" id="resultBox">
     <div class="cookie-row">
       <div class="cookie-label">service_token</div>
@@ -279,31 +154,12 @@ body {
       </div>
     </div>
   </div>
-
-  <!-- 配置输出 -->
   <div class="config-section" id="configSection">
-    <div class="config-title">📋 完整配置格式（可直接粘贴到Web页面）</div>
+    <div class="config-title">📋 完整配置</div>
     <div class="config-output" id="configOutput"></div>
-    <button class="btn btn-success" id="copyConfigBtn">一键复制完整配置</button>
-    <button class="btn btn-warning" id="testBtn">🧪 测试账号有效性</button>
-    <div class="test-result" id="testResult"></div>
+    <button class="btn btn-success" id="copyConfigBtn">一键复制</button>
   </div>
-
-  <!-- 账号管理 -->
-  <div class="section-title">
-    <span>已保存账号 (<span id="accountCount">0</span>)</span>
-    <button class="small-btn" id="exportAllBtn">导出全部</button>
-  </div>
-  
-  <div class="account-list" id="accountList"></div>
-  
-  <div class="input-row" id="saveRow" style="display:none;">
-    <input type="text" id="accountName" placeholder="输入账号名称（如：主账号）" />
-    <button class="small-btn" id="saveBtn" style="background:#667eea;">保存</button>
-  </div>
-
-  <div class="hint">在 MiMo 网页登录后，点击上方按钮抓取 Cookie</div>
-
+  <div class="hint">在 MiMo 网页发送消息后点击抓取</div>
   <script src="popup.js"></script>
 </body>
 </html>
