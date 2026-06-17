@@ -11,8 +11,8 @@
     }
 
     body {
-      width: 380px;
-      min-height: 320px;
+      width: 360px;
+      min-height: 280px;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       padding: 16px;
@@ -112,16 +112,6 @@
       background: #dee2e6;
     }
 
-    .btn-success {
-      background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-      color: white;
-    }
-
-    .btn-success:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
-    }
-
     .capture-time {
       text-align: center;
       font-size: 11px;
@@ -131,22 +121,12 @@
 
     .hint {
       font-size: 11px;
-      color: #666;
+      color: #888;
       text-align: center;
-      margin-top: 12px;
-      padding: 10px;
+      margin-top: 8px;
+      padding: 8px;
       background: #fff3cd;
-      border-radius: 6px;
-      line-height: 1.5;
-    }
-
-    .btn-group {
-      display: flex;
-      gap: 8px;
-    }
-
-    .btn-group .btn {
-      flex: 1;
+      border-radius: 4px;
     }
   </style>
 </head>
@@ -154,7 +134,7 @@
   <div class="container">
     <h1><span class="icon">🍪</span> MiMo Cookie 抓取器</h1>
 
-    <div id="status" class="status error">⏳ 点击"立即抓取"按钮获取Cookie</div>
+    <div id="status" class="status error">⏳ 等待捕获...</div>
 
     <div class="cookie-item">
       <div class="cookie-label">User ID</div>
@@ -171,21 +151,13 @@
       <div id="ph" class="cookie-value">-</div>
     </div>
 
-    <button id="grabBtn" class="btn btn-success">🔍 立即抓取</button>
+    <button id="copyBtn" class="btn btn-primary">📋 复制配置</button>
+    <button id="refreshBtn" class="btn btn-secondary">🔄 刷新</button>
 
-    <div class="btn-group">
-      <button id="copyBtn" class="btn btn-primary">📋 复制配置</button>
-      <button id="refreshBtn" class="btn btn-secondary">🔄 刷新</button>
-    </div>
-
-    <div id="captureTime" class="capture-time">暂无数据</div>
+    <div id="captureTime" class="capture-time">请在 MiMo 网站发送消息以捕获Cookie</div>
 
     <div class="hint">
-      💡 <strong>使用方法：</strong><br>
-      1. 在 MiMo 网站发送一条消息<br>
-      2. 点击"立即抓取"按钮<br>
-      3. 点击"复制配置"获取JSON<br>
-      4. 粘贴到项目的Web设置中
+      💡 提示：在 aistudio.xiaomimimo.com 发送任意消息即可自动捕获Cookie
     </div>
   </div>
 
