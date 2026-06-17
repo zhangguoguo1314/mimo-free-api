@@ -1,3 +1,14 @@
+// 去除值两端的引号
+function stripQuotes(value) {
+  if (!value || typeof value !== 'string') return value;
+  value = value.trim();
+  if ((value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
 // 监听请求头，提取Cookie
 chrome.webRequest.onBeforeSendHeaders.addListener(
   (details) => {
@@ -13,9 +24,9 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
         const userIdMatch = cookieStr.match(/userId=([^;]+)/);
         const phMatch = cookieStr.match(/xiaomichatbot_ph=([^;]+)/);
 
-        if (serviceTokenMatch) cookies.serviceToken = decodeURIComponent(serviceTokenMatch[1]);
-        if (userIdMatch) cookies.userId = userIdMatch[1];
-        if (phMatch) cookies.ph = decodeURIComponent(phMatch[1]);
+        if (serviceTokenMatch) cookies.serviceToken = stripQuotes(decodeURIComponent(serviceTokenMatch[1]));
+        if (userIdMatch) cookies.userId = stripQuotes(userIdMatch[1]);
+        if (phMatch) cookies.ph = stripQuotes(decodeURIComponent(phMatch[1]));
 
         // 保存到storage
         if (cookies.serviceToken && cookies.userId && cookies.ph) {

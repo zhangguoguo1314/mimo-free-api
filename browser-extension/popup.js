@@ -44,17 +44,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadCookies();
   });
 
-  // 去除引号
-  function stripQuotes(value) {
-    if (!value || typeof value !== 'string') return value;
-    value = value.trim();
-    if ((value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'"))) {
-      return value.slice(1, -1);
-    }
-    return value;
-  }
-
   // 复制配置按钮
   copyBtn.addEventListener('click', async () => {
     const { mimoCookies } = await getCookies();
@@ -67,9 +56,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const config = {
       accounts: [{
         id: `account-${Date.now()}`,
-        service_token: stripQuotes(mimoCookies.serviceToken),
-        user_id: stripQuotes(mimoCookies.userId),
-        ph: stripQuotes(mimoCookies.ph),
+        service_token: mimoCookies.serviceToken,
+        user_id: mimoCookies.userId,
+        ph: mimoCookies.ph,
         active: true
       }]
     };
