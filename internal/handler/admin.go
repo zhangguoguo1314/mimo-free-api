@@ -3,7 +3,10 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/zhangguoguo1314/mimo-free-api/internal/config"
 	"github.com/zhangguoguo1314/mimo-free-api/internal/pool"
@@ -133,27 +136,52 @@ func (h *AdminHandler) TestAccount(w http.ResponseWriter, r *http.Request) {
 
 // testAccountValidity 测试账号是否有效
 func testAccountValidity(acc *config.Account) bool {
-	// 构建测试请求
-	client := &http.Client{}
-	req, err := http.NewRequest("GET", "https://aistudio.xiaomimimo.com/api/user/info", nil)
-	if err != nil {
-		return false
+	// 构建测试请求 - 使用chat API测试，因为这个API需要完整的认证
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	// 尝试多个端点
+	endpoints := []string{
+		"https://aistudio.xiaomimimo.com/open-apis/bot/chat",
+		"https://aistudio.xiaomimimo.com/api/user/info",
 	}
 
-	// 设置 Cookie
-	cookie := fmt.Sprintf("serviceToken=%s; userId=%s; xiaomichatbot_ph=%s",
-		acc.ServiceToken, acc.UserID, acc.Ph)
-	req.Header.Set("Cookie", cookie)
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.0")
+	for _, url := range endpoints {
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			continue
+		}
 
-	resp, err := client.Do(req)
-	if err != nil {
-		return false
+		// 设置完整的 Cookie - 按照浏览器中的格式
+		cookie := fmt.Sprintf("serviceToken=%s; userId=%s; xiaomichatbot_ph=%s",
+			acc.ServiceToken, acc.UserID, acc.Ph)
+
+		req.Header.Set("Cookie", cookie)
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.0")
+		req.Header.Set("Accept", "*/*")
+		req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
+		req.Header.Set("Referer", "https://aistudio.xiaomimimo.com/")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			continue
+		}
+
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		// 检查响应 - 只要不是401/403就说明cookie有效
+		if resp.StatusCode != 401 && resp.StatusCode != 403 {
+			// 额外检查响应内容是否包含错误信息
+			bodyStr := string(body)
+			if !strings.Contains(bodyStr, "unauthorized") &&
+				!strings.Contains(bodyStr, "invalid") &&
+				!strings.Contains(bodyStr, "expired") {
+				return true
+			}
+		}
 	}
-	defer resp.Body.Close()
 
-	// 如果返回 200，说明账号有效
-	return resp.StatusCode == 200
+	return false
 }
 
 func writeJSON(w http.ResponseWriter, data interface{}) {
