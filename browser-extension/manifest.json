@@ -1,12 +1,12 @@
 {
   "manifest_version": 3,
   "name": "MiMo Cookie 抓取器",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "一键抓取 MiMo Cookie",
   "permissions": [
     "activeTab",
-    "webRequest",
-    "storage"
+    "storage",
+    "scripting"
   ],
   "host_permissions": [
     "https://aistudio.xiaomimimo.com/*",
@@ -15,8 +15,19 @@
   "background": {
     "service_worker": "background.js"
   },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://aistudio.xiaomimimo.com/*",
+        "https://*.xiaomimimo.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
   "action": {
-    "default_popup": "popup.html",
+    "default_title": "点击抓取 MiMo Cookie",
     "default_icon": {
       "16": "icon.svg",
       "48": "icon.svg",
