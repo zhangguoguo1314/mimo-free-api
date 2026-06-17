@@ -5,7 +5,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/wtz44/mimo-gateway/internal/adapter"
+	"github.com/zhangguoguo1314/mimo-free-api/internal/adapter"
 )
 
 // ExtractFirstUserMessage extracts the first user message text from Anthropic messages.

@@ -10,9 +10,9 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
-	"github.com/wtz44/mimo-gateway/internal/config"
-	"github.com/wtz44/mimo-gateway/internal/handler"
-	"github.com/wtz44/mimo-gateway/internal/pool"
+	"github.com/zhangguoguo1314/mimo-free-api/internal/config"
+	"github.com/zhangguoguo1314/mimo-free-api/internal/handler"
+	"github.com/zhangguoguo1314/mimo-free-api/internal/pool"
 )
 
 //go:embed all:../../static

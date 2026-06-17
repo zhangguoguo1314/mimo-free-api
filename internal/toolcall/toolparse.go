@@ -8,7 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
-	"github.com/wtz44/mimo-gateway/internal/adapter"
+	"github.com/zhangguoguo1314/mimo-free-api/internal/adapter"
 )
 
 type ParsedToolCall struct {

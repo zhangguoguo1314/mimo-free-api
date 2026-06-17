@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/wtz44/mimo-gateway/internal/adapter"
+	"github.com/zhangguoguo1314/mimo-free-api/internal/adapter"
 )
 
 // buildToolPrompt builds a concise tool description string from OpenAI tool definitions.

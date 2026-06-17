@@ -1,4 +1,4 @@
-module github.com/wtz44/mimo-gateway
+module github.com/zhangguoguo1314/mimo-free-api
 
 go 1.22.0
 

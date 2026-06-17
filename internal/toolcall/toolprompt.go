@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/wtz44/mimo-gateway/internal/adapter"
+	"github.com/zhangguoguo1314/mimo-free-api/internal/adapter"
 )
 
 // BuildToolPrompt converts OpenAI tools to text instructions for system prompt injection.

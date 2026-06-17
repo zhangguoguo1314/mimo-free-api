@@ -6,8 +6,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/wtz44/mimo-gateway/internal/config"
-	"github.com/wtz44/mimo-gateway/internal/mimo"
+	"github.com/zhangguoguo1314/mimo-free-api/internal/config"
+	"github.com/zhangguoguo1314/mimo-free-api/internal/mimo"
 )
 
 type Pool struct {

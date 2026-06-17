@@ -3,7 +3,7 @@ package router
 import (
 	"strings"
 
-	"github.com/wtz44/mimo-gateway/internal/mimo"
+	"github.com/zhangguoguo1314/mimo-free-api/internal/mimo"
 )
 
 const (

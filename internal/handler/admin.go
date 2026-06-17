@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/wtz44/mimo-gateway/internal/config"
-	"github.com/wtz44/mimo-gateway/internal/pool"
-	"github.com/wtz44/mimo-gateway/internal/stats"
+	"github.com/zhangguoguo1314/mimo-free-api/internal/config"
+	"github.com/zhangguoguo1314/mimo-free-api/internal/pool"
+	"github.com/zhangguoguo1314/mimo-free-api/internal/stats"
 )
 
 type AdminHandler struct {

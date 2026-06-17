@@ -5,8 +5,8 @@ import (
 	"log"
 	"unicode/utf8"
 
-	"github.com/wtz44/mimo-gateway/internal/adapter"
-	"github.com/wtz44/mimo-gateway/internal/prompt"
+	"github.com/zhangguoguo1314/mimo-free-api/internal/adapter"
+	"github.com/zhangguoguo1314/mimo-free-api/internal/prompt"
 )
 
 const (

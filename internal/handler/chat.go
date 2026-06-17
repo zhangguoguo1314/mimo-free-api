@@ -10,14 +10,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/wtz44/mimo-gateway/internal/adapter"
-	"github.com/wtz44/mimo-gateway/internal/convstore"
-	"github.com/wtz44/mimo-gateway/internal/mimo"
-	"github.com/wtz44/mimo-gateway/internal/pool"
-	"github.com/wtz44/mimo-gateway/internal/promptcompat"
-	"github.com/wtz44/mimo-gateway/internal/router"
-	"github.com/wtz44/mimo-gateway/internal/stats"
-	"github.com/wtz44/mimo-gateway/internal/toolcall"
+	"github.com/zhangguoguo1314/mimo-free-api/internal/adapter"
+	"github.com/zhangguoguo1314/mimo-free-api/internal/convstore"
+	"github.com/zhangguoguo1314/mimo-free-api/internal/mimo"
+	"github.com/zhangguoguo1314/mimo-free-api/internal/pool"
+	"github.com/zhangguoguo1314/mimo-free-api/internal/promptcompat"
+	"github.com/zhangguoguo1314/mimo-free-api/internal/router"
+	"github.com/zhangguoguo1314/mimo-free-api/internal/stats"
+	"github.com/zhangguoguo1314/mimo-free-api/internal/toolcall"
 )
 
 type ChatHandler struct {
