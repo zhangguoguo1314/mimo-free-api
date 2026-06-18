@@ -390,14 +390,8 @@ func (h *AdminHandler) UpdateCookie(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// SetPassword 首次设置密码
+// SetPassword 设置密码（允许随时覆盖）
 func (h *AdminHandler) SetPassword(w http.ResponseWriter, r *http.Request) {
-	cfg := config.Get()
-	if cfg.PasswordSet {
-		writeError(w, http.StatusForbidden, "password already set, use /admin/api/password/change instead")
-		return
-	}
-
 	var req struct {
 		Password string `json:"password"`
 	}

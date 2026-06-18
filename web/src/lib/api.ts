@@ -39,7 +39,7 @@ export async function testAccountAllModels(accountId: string): Promise<{results:
 
 // 账号池全量测试
 export async function testPoolAll(): Promise<{results: Array<{id: string; healthy: boolean; error?: string}>}> {
-  const res = await apiFetch('/admin/api/accounts/test-pool', {
+  const res = await apiFetch('/admin/api/pool/test-all', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' }
   })
@@ -68,16 +68,16 @@ export async function importAccounts(accounts: any[]): Promise<{imported: number
 
 // 替换Cookie
 export async function replaceCookie(accountId: string, data: {service_token: string; user_id: string; ph: string}): Promise<any> {
-  const res = await apiFetch('/admin/api/accounts/replace-cookie', {
-    method: 'POST',
+  const res = await apiFetch('/admin/api/accounts/cookie', {
+    method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: accountId, ...data })
+    body: JSON.stringify({ account_id: accountId, ...data })
   })
   return res.json()
 }
 
 // 密码相关
-export async function getPasswordStatus(): Promise<{set: boolean}> {
+export async function getPasswordStatus(): Promise<{password_set: boolean}> {
   const res = await apiFetch('/admin/api/password/status')
   return res.json()
 }

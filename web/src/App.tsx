@@ -28,7 +28,7 @@ function AppInner() {
     // No token, check if password is set
     getPasswordStatus()
       .then(result => {
-        if (result.set) {
+        if (result.password_set) {
           setAuthState('login')
         } else {
           setAuthState('setup')

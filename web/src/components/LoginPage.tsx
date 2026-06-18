@@ -21,7 +21,7 @@ export function LoginPage({ mode, onSuccess }: LoginPageProps) {
 
   const handleLogin = async () => {
     if (!password.trim()) {
-      setError(isDark ? '请输入密码' : 'Please enter password')
+      setError('请输入密码')
       return
     }
     setLoading(true)
@@ -32,10 +32,10 @@ export function LoginPage({ mode, onSuccess }: LoginPageProps) {
         localStorage.setItem('admin_token', result.token)
         onSuccess()
       } else {
-        setError(isDark ? '密码错误' : 'Wrong password')
+        setError('密码错误')
       }
     } catch (e) {
-      setError(isDark ? '登录失败，请重试' : 'Login failed, please try again')
+      setError('登录失败，请重试')
     } finally {
       setLoading(false)
     }
@@ -43,15 +43,15 @@ export function LoginPage({ mode, onSuccess }: LoginPageProps) {
 
   const handleSetup = async () => {
     if (!password.trim()) {
-      setError(isDark ? '请输入密码' : 'Please enter password')
+      setError('请输入密码')
       return
     }
     if (password.length < 6) {
-      setError(isDark ? '密码长度至少6位' : 'Password must be at least 6 characters')
+      setError('密码长度至少6位')
       return
     }
     if (password !== confirmPassword) {
-      setError(isDark ? '两次密码不一致' : 'Passwords do not match')
+      setError('两次密码不一致')
       return
     }
     setLoading(true)
@@ -66,10 +66,10 @@ export function LoginPage({ mode, onSuccess }: LoginPageProps) {
           onSuccess()
         }
       } else {
-        setError(isDark ? '设置失败，请重试' : 'Setup failed, please try again')
+        setError('设置失败，请重试')
       }
     } catch (e) {
-      setError(isDark ? '设置失败，请重试' : 'Setup failed, please try again')
+      setError('设置失败，请重试')
     } finally {
       setLoading(false)
     }
@@ -126,8 +126,8 @@ export function LoginPage({ mode, onSuccess }: LoginPageProps) {
           </h1>
           <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
             {mode === 'login'
-              ? (isDark ? '请输入管理员密码' : 'Enter admin password')
-              : (isDark ? '首次使用，请设置管理员密码' : 'First time, set admin password')
+              ? '请输入管理员密码'
+              : '首次使用，请设置管理员密码'
             }
           </p>
         </div>
@@ -137,7 +137,7 @@ export function LoginPage({ mode, onSuccess }: LoginPageProps) {
           <div className="space-y-1.5">
             <label className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'} flex items-center gap-1.5`}>
               <Lock className="w-3.5 h-3.5" />
-              {isDark ? '密码' : 'Password'}
+              密码
             </label>
             <div className="relative">
               <input
@@ -146,7 +146,7 @@ export function LoginPage({ mode, onSuccess }: LoginPageProps) {
                 onChange={e => { setPassword(e.target.value); setError('') }}
                 onKeyDown={handleKeyDown}
                 className={inputClass}
-                placeholder={isDark ? '输入密码' : 'Enter password'}
+                placeholder='输入密码'
                 autoFocus
               />
               <button
@@ -163,7 +163,7 @@ export function LoginPage({ mode, onSuccess }: LoginPageProps) {
             <div className="space-y-1.5">
               <label className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'} flex items-center gap-1.5`}>
                 <Lock className="w-3.5 h-3.5" />
-                {isDark ? '确认密码' : 'Confirm Password'}
+                确认密码
               </label>
               <div className="relative">
                 <input
@@ -172,7 +172,7 @@ export function LoginPage({ mode, onSuccess }: LoginPageProps) {
                   onChange={e => { setConfirmPassword(e.target.value); setError('') }}
                   onKeyDown={handleKeyDown}
                   className={inputClass}
-                  placeholder={isDark ? '再次输入密码' : 'Enter password again'}
+                  placeholder='再次输入密码'
                 />
               </div>
             </div>
@@ -203,10 +203,10 @@ export function LoginPage({ mode, onSuccess }: LoginPageProps) {
               <Lock className="w-4 h-4" />
             )}
             {loading
-              ? (isDark ? '处理中...' : 'Processing...')
+              ? '处理中...'
               : mode === 'login'
-                ? (isDark ? '登录' : 'Login')
-                : (isDark ? '设置密码' : 'Set Password')
+                ? '登录'
+                : '设置密码'
             }
           </motion.button>
         </form>
