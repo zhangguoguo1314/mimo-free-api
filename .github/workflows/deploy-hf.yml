@@ -25,10 +25,11 @@ jobs:
           cp go.mod go.sum hf-space/
           cp main.go hf-space/
           cp -r internal hf-space/
-          cp -r static hf-space/
           cp -r web hf-space/
           cp -r browser-extension hf-space/
-          cp cmd hf-space/
+          cp -r cmd hf-space/
+          # 复制 static（如果存在）
+          if [ -d "static" ]; then cp -r static hf-space/; fi
           cd hf-space
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
