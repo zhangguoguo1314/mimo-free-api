@@ -7,10 +7,12 @@ import (
 )
 
 type Config struct {
-	Port         string    `json:"port"`
-	APIKey       string    `json:"api_key"` // 网关自身的认证 Key
-	DefaultModel string    `json:"default_model"`
-	Accounts     []Account `json:"accounts"`
+	Port          string    `json:"port"`
+	APIKey        string    `json:"api_key"` // 网关自身的认证 Key
+	DefaultModel  string    `json:"default_model"`
+	Accounts      []Account `json:"accounts"`
+	AdminPassword string    `json:"admin_password"`
+	PasswordSet   bool      `json:"password_set"`
 }
 
 // Account 网页端账号配置

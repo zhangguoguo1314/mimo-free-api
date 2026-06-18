@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Key, Cpu, Save, Eye, EyeOff, Check, Loader2, Users, Plus, Trash2, Globe, ClipboardPaste, TestTube } from 'lucide-react'
+import { Key, Cpu, Save, Eye, EyeOff, Check, Loader2, Users, Plus, Trash2, Globe, ClipboardPaste, TestTube, Download, Upload, RefreshCw, X } from 'lucide-react'
 import { useSettings } from '../contexts/SettingsContext'
-import { apiFetch } from '../lib/api'
+import { apiFetch, testAccountModel, testPoolAll, exportAccounts, importAccounts, replaceCookie } from '../lib/api'
 
 interface Account {
   id: string
@@ -10,6 +10,14 @@ interface Account {
   user_id: string
   ph: string
   active: boolean
+}
+
+interface ModelTestResult {
+  model: string
+  loading: boolean
+  success?: boolean
+  response?: string
+  error?: string
 }
 
 export function ConfigPanel() {
@@ -36,6 +44,25 @@ export function ConfigPanel() {
   const [showPaste, setShowPaste] = useState(false)
   const [testingAccount, setTestingAccount] = useState<string | null>(null)
   const [testResults, setTestResults] = useState<Record<string, { status: 'ok' | 'error' | 'testing', message: string }>>({})
+
+  // New states for model test dropdown
+  const [showModelDropdown, setShowModelDropdown] = useState<string | null>(null)
+  const [modelTestResults, setModelTestResults] = useState<Record<string, ModelTestResult>>({})
+
+  // Cookie replacement modal state
+  const [showCookieModal, setShowCookieModal] = useState(false)
+  const [cookieAccount, setCookieAccount] = useState<Account | null>(null)
+  const [cookieForm, setCookieForm] = useState({ service_token: '', user_id: '', ph: '' })
+  const [cookieSaving, setCookieSaving] = useState(false)
+
+  // Pool test state
+  const [poolTesting, setPoolTesting] = useState(false)
+  const [poolTestResults, setPoolTestResults] = useState<Array<{id: string; healthy: boolean; error?: string}> | null>(null)
+
+  // Import/Export state
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [importing, setImporting] = useState(false)
+  const [importResult, setImportResult] = useState<{imported: number; skipped: number; failed: number} | null>(null)
 
   const loadConfig = () => {
     apiFetch('/admin/api/config')
@@ -105,11 +132,11 @@ export function ConfigPanel() {
   // 处理粘贴的 JSON 配置
   const handlePasteJson = async () => {
     if (!pasteJson.trim()) return
-    
+
     try {
       const parsed = JSON.parse(pasteJson)
       let accountsToAdd: Account[] = []
-      
+
       // 支持两种格式：{ accounts: [...] } 或直接 [...]
       if (parsed.accounts && Array.isArray(parsed.accounts)) {
         accountsToAdd = parsed.accounts
@@ -118,17 +145,17 @@ export function ConfigPanel() {
       } else if (parsed.id && parsed.service_token) {
         accountsToAdd = [parsed as Account]
       }
-      
+
       if (accountsToAdd.length === 0) {
         alert(lang === 'zh' ? '未找到有效的账号配置' : 'No valid account config found')
         return
       }
-      
+
       // 逐个添加账号
       let added = 0
       for (const acc of accountsToAdd) {
         if (!acc.id || !acc.service_token) continue
-        
+
         const res = await apiFetch('/admin/api/accounts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -142,7 +169,7 @@ export function ConfigPanel() {
         })
         if (res.ok) added++
       }
-      
+
       if (added > 0) {
         setPasteJson('')
         setShowPaste(false)
@@ -160,7 +187,7 @@ export function ConfigPanel() {
   const handleTestAccount = async (account: Account) => {
     setTestingAccount(account.id)
     setTestResults(prev => ({ ...prev, [account.id]: { status: 'testing', message: lang === 'zh' ? '测试中...' : 'Testing...' } }))
-    
+
     try {
       // 调用后端测试接口
       const res = await apiFetch('/admin/api/accounts/test', {
@@ -168,7 +195,7 @@ export function ConfigPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: account.id })
       })
-      
+
       if (res.ok) {
         const data = await res.json()
         if (data.valid) {
@@ -183,6 +210,123 @@ export function ConfigPanel() {
       setTestResults(prev => ({ ...prev, [account.id]: { status: 'error', message: lang === 'zh' ? '✗ 网络错误' : '✗ Network error' } }))
     } finally {
       setTestingAccount(null)
+    }
+  }
+
+  // 测试单个模型
+  const handleTestModel = async (accountId: string, model: string) => {
+    setShowModelDropdown(null)
+    setModelTestResults(prev => ({
+      ...prev,
+      [`${accountId}-${model}`]: { model, loading: true }
+    }))
+
+    try {
+      const result = await testAccountModel(accountId, model)
+      setModelTestResults(prev => ({
+        ...prev,
+        [`${accountId}-${model}`]: {
+          model,
+          loading: false,
+          success: result.success,
+          response: result.success ? result.response.slice(0, 200) : undefined,
+          error: result.error
+        }
+      }))
+    } catch (e) {
+      setModelTestResults(prev => ({
+        ...prev,
+        [`${accountId}-${model}`]: {
+          model,
+          loading: false,
+          success: false,
+          error: (e as Error).message
+        }
+      }))
+    }
+  }
+
+  // Cookie 替换
+  const handleOpenCookieModal = (account: Account) => {
+    setCookieAccount(account)
+    setCookieForm({
+      service_token: account.service_token,
+      user_id: account.user_id,
+      ph: account.ph
+    })
+    setShowCookieModal(true)
+  }
+
+  const handleSaveCookie = async () => {
+    if (!cookieAccount) return
+    setCookieSaving(true)
+    try {
+      await replaceCookie(cookieAccount.id, cookieForm)
+      setShowCookieModal(false)
+      setCookieAccount(null)
+      loadConfig()
+    } catch (e) {
+      alert(lang === 'zh' ? '保存失败: ' + (e as Error).message : 'Save failed: ' + (e as Error).message)
+    } finally {
+      setCookieSaving(false)
+    }
+  }
+
+  // 全量测试
+  const handlePoolTest = async () => {
+    setPoolTesting(true)
+    setPoolTestResults(null)
+    try {
+      const result = await testPoolAll()
+      setPoolTestResults(result.results)
+    } catch (e) {
+      alert(lang === 'zh' ? '全量测试失败' : 'Pool test failed')
+    } finally {
+      setPoolTesting(false)
+    }
+  }
+
+  // 导出
+  const handleExport = async () => {
+    try {
+      const blob = await exportAccounts()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      const date = new Date().toISOString().slice(0, 10)
+      a.href = url
+      a.download = `mimo-accounts-${date}.json`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      alert(lang === 'zh' ? '导出失败' : 'Export failed')
+    }
+  }
+
+  // 导入
+  const handleImportClick = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImporting(true)
+    setImportResult(null)
+    try {
+      const text = await file.text()
+      const data = JSON.parse(text)
+      const accountsArray = data.accounts || (Array.isArray(data) ? data : [])
+      const result = await importAccounts(accountsArray)
+      setImportResult(result)
+      loadConfig()
+    } catch (e) {
+      alert(lang === 'zh' ? '导入失败: ' + (e as Error).message : 'Import failed: ' + (e as Error).message)
+    } finally {
+      setImporting(false)
+      // Reset file input
+      if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
 
@@ -208,6 +352,15 @@ export function ConfigPanel() {
 
   return (
     <div className="space-y-8 max-w-3xl">
+      {/* Hidden file input for import */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json"
+        className="hidden"
+        onChange={handleImportFile}
+      />
+
       {/* Header */}
       <div>
         <motion.h1 className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-800'}`} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>
@@ -275,10 +428,34 @@ export function ConfigPanel() {
             <Users className={`w-4 h-4 ${isDark ? 'text-purple-400' : 'text-blue-500'}`} />
             MiMo {lang === 'zh' ? '账号池' : 'Account Pool'}
           </h2>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <span className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
               {accounts.filter(a => a.active).length}/{accounts.length} active
             </span>
+            {/* 全量测试 */}
+            <motion.button onClick={handlePoolTest} disabled={poolTesting}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                isDark ? 'bg-amber-500/10 text-amber-400 hover:bg-amber-500/20' : 'bg-amber-50 text-amber-600 hover:bg-amber-100'
+              }`} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+              {poolTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+              {lang === 'zh' ? '全量测试' : 'Test All'}
+            </motion.button>
+            {/* 导出 */}
+            <motion.button onClick={handleExport}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                isDark ? 'bg-sky-500/10 text-sky-400 hover:bg-sky-500/20' : 'bg-sky-50 text-sky-600 hover:bg-sky-100'
+              }`} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+              <Download className="w-4 h-4" />
+              {lang === 'zh' ? '导出' : 'Export'}
+            </motion.button>
+            {/* 导入 */}
+            <motion.button onClick={handleImportClick} disabled={importing}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                isDark ? 'bg-violet-500/10 text-violet-400 hover:bg-violet-500/20' : 'bg-violet-50 text-violet-600 hover:bg-violet-100'
+              }`} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+              {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+              {lang === 'zh' ? '导入' : 'Import'}
+            </motion.button>
             <motion.button onClick={() => setShowPaste(!showPaste)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors ${
                 isDark ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
@@ -295,6 +472,69 @@ export function ConfigPanel() {
             </motion.button>
           </div>
         </div>
+
+        {/* Import result */}
+        <AnimatePresence>
+          {importResult && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="overflow-hidden"
+            >
+              <div className={`p-3 rounded-xl border text-sm flex items-center gap-3 ${
+                isDark ? 'bg-violet-500/10 border-violet-500/20 text-violet-300' : 'bg-violet-50 border-violet-200 text-violet-700'
+              }`}>
+                <Check className="w-4 h-4 shrink-0" />
+                <span>
+                  {lang === 'zh'
+                    ? `导入完成: 成功 ${importResult.imported}，跳过 ${importResult.skipped}，失败 ${importResult.failed}`
+                    : `Import done: ${importResult.imported} imported, ${importResult.skipped} skipped, ${importResult.failed} failed`
+                  }
+                </span>
+                <button onClick={() => setImportResult(null)} className="ml-auto opacity-60 hover:opacity-100">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Pool test results */}
+        <AnimatePresence>
+          {poolTestResults && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="overflow-hidden"
+            >
+              <div className={`p-4 rounded-xl border space-y-2 ${
+                isDark ? 'bg-amber-500/5 border-amber-500/20' : 'bg-amber-50/50 border-amber-200'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <span className={`text-sm font-medium ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>
+                    {lang === 'zh' ? '全量测试结果' : 'Pool Test Results'}
+                  </span>
+                  <button onClick={() => setPoolTestResults(null)} className={`opacity-60 hover:opacity-100 ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="space-y-1">
+                  {poolTestResults.map(r => (
+                    <div key={r.id} className={`flex items-center gap-2 text-xs ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                      <span className={r.healthy ? 'text-emerald-500' : 'text-red-500'}>
+                        {r.healthy ? '✓' : '✗'}
+                      </span>
+                      <span className="font-mono">{r.id}</span>
+                      {r.error && <span className="text-red-400">{r.error}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Paste JSON Form */}
         <AnimatePresence>
@@ -404,20 +644,106 @@ export function ConfigPanel() {
                       </div>
                       {testResults[acc.id] && (
                         <div className={`mt-2 text-xs ${
-                          testResults[acc.id].status === 'ok' ? 'text-emerald-500' : 
+                          testResults[acc.id].status === 'ok' ? 'text-emerald-500' :
                           testResults[acc.id].status === 'error' ? 'text-red-500' : 'text-amber-500'
                         }`}>
                           {testResults[acc.id].message}
                         </div>
                       )}
+                      {/* Model test results */}
+                      {(['mimo-v2.5', 'mimo-v2.5-pro'] as const).map(model => {
+                        const resultKey = `${acc.id}-${model}`
+                        const result = modelTestResults[resultKey]
+                        if (!result) return null
+                        return (
+                          <div key={resultKey} className={`mt-1 text-xs ${
+                            result.loading ? 'text-amber-500' :
+                            result.success ? 'text-emerald-500' : 'text-red-500'
+                          }`}>
+                            {result.loading && (
+                              <span className="flex items-center gap-1">
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                                {model}: {lang === 'zh' ? '测试中...' : 'Testing...'}
+                              </span>
+                            )}
+                            {!result.loading && result.success && (
+                              <span>{model}: {result.response}</span>
+                            )}
+                            {!result.loading && !result.success && (
+                              <span>{model}: {result.error || (lang === 'zh' ? '测试失败' : 'Test failed')}</span>
+                            )}
+                          </div>
+                        )
+                      })}
                     </div>
 
+                    {/* 测试模型按钮 (带下拉) */}
+                    <div className="relative">
+                      <motion.button
+                        onClick={() => setShowModelDropdown(showModelDropdown === acc.id ? null : acc.id)}
+                        className={`p-2 rounded-lg transition-colors ${isDark ? 'text-gray-500 hover:text-cyan-400 hover:bg-cyan-500/10' : 'text-gray-400 hover:text-cyan-500 hover:bg-cyan-50'}`}
+                        whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+                      >
+                        <Cpu className="w-4 h-4" />
+                      </motion.button>
+                      <AnimatePresence>
+                        {showModelDropdown === acc.id && (
+                          <motion.div
+                            initial={{ opacity: 0, y: -5, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: -5, scale: 0.95 }}
+                            className={`absolute right-0 top-full mt-1 w-48 rounded-xl border shadow-lg z-50 ${
+                              isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+                            }`}
+                          >
+                            <div className="p-1">
+                              <button
+                                onClick={() => handleTestModel(acc.id, 'mimo-v2.5')}
+                                className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 ${
+                                  isDark ? 'text-gray-300 hover:bg-white/[0.06]' : 'text-gray-600 hover:bg-gray-50'
+                                }`}
+                              >
+                                {modelTestResults[`${acc.id}-mimo-v2.5`]?.loading ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <TestTube className="w-3.5 h-3.5" />
+                                )}
+                                mimo-v2.5
+                              </button>
+                              <button
+                                onClick={() => handleTestModel(acc.id, 'mimo-v2.5-pro')}
+                                className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 ${
+                                  isDark ? 'text-gray-300 hover:bg-white/[0.06]' : 'text-gray-600 hover:bg-gray-50'
+                                }`}
+                              >
+                                {modelTestResults[`${acc.id}-mimo-v2.5-pro`]?.loading ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <TestTube className="w-3.5 h-3.5" />
+                                )}
+                                mimo-v2.5-pro
+                              </button>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+
+                    {/* 替换Cookie按钮 */}
+                    <motion.button onClick={() => handleOpenCookieModal(acc)}
+                      className={`p-2 rounded-lg transition-colors ${isDark ? 'text-gray-500 hover:text-orange-400 hover:bg-orange-500/10' : 'text-gray-400 hover:text-orange-500 hover:bg-orange-50'}`}
+                      whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
+                      <RefreshCw className="w-4 h-4" />
+                    </motion.button>
+
+                    {/* 测试账号有效性 */}
                     <motion.button onClick={() => handleTestAccount(acc)}
                       disabled={testingAccount === acc.id}
                       className={`p-2 rounded-lg transition-colors ${isDark ? 'text-gray-500 hover:text-blue-400 hover:bg-blue-500/10' : 'text-gray-400 hover:text-blue-500 hover:bg-blue-50'}`}
                       whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
                       {testingAccount === acc.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <TestTube className="w-4 h-4" />}
                     </motion.button>
+                    {/* 删除 */}
                     <motion.button onClick={() => handleDelete(acc.id)}
                       className={`p-2 rounded-lg transition-colors ${isDark ? 'text-gray-500 hover:text-red-400 hover:bg-red-500/10' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
                       whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
@@ -430,6 +756,85 @@ export function ConfigPanel() {
           </div>
         )}
       </motion.div>
+
+      {/* Cookie Replacement Modal */}
+      <AnimatePresence>
+        {showCookieModal && cookieAccount && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={() => setShowCookieModal(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className={`w-full max-w-lg mx-4 rounded-2xl border p-6 space-y-5 shadow-2xl ${
+                isDark ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'
+              }`}
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between">
+                <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-800'}`}>
+                  {lang === 'zh' ? '替换 Cookie' : 'Replace Cookie'} - {cookieAccount.id}
+                </h3>
+                <button onClick={() => setShowCookieModal(false)}
+                  className={`p-1.5 rounded-lg transition-colors ${isDark ? 'text-gray-400 hover:text-white hover:bg-white/10' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}>
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>service_token</label>
+                  <input
+                    type="text"
+                    value={cookieForm.service_token}
+                    onChange={e => setCookieForm(prev => ({ ...prev, service_token: e.target.value }))}
+                    className={inputClass}
+                    placeholder="service_token"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>user_id</label>
+                  <input
+                    type="text"
+                    value={cookieForm.user_id}
+                    onChange={e => setCookieForm(prev => ({ ...prev, user_id: e.target.value }))}
+                    className={inputClass}
+                    placeholder="user_id"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>ph</label>
+                  <input
+                    type="text"
+                    value={cookieForm.ph}
+                    onChange={e => setCookieForm(prev => ({ ...prev, ph: e.target.value }))}
+                    className={inputClass}
+                    placeholder="xiaomichatbot_ph"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3 justify-end">
+                <button onClick={() => setShowCookieModal(false)}
+                  className={`px-4 py-2 rounded-lg text-sm transition-colors ${isDark ? 'text-gray-400 hover:text-white' : 'text-gray-500 hover:text-gray-700'}`}>
+                  {lang === 'zh' ? '取消' : 'Cancel'}
+                </button>
+                <motion.button onClick={handleSaveCookie} disabled={cookieSaving}
+                  className="flex items-center gap-2 px-5 py-2 bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-lg text-sm disabled:opacity-50"
+                  whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                  {cookieSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  {lang === 'zh' ? '保存' : 'Save'}
+                </motion.button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Save */}
       <motion.div className="flex justify-end" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }}>

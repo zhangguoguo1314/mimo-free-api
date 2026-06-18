@@ -77,13 +77,29 @@ func main() {
 
 	// 管理接口
 	r.Route("/admin/api", func(r chi.Router) {
-		r.Get("/config", adminHandler.GetConfig)
-		r.Post("/config", adminHandler.UpdateConfig)
-		r.Post("/accounts", adminHandler.AddAccount)
-		r.Delete("/accounts", adminHandler.DeleteAccount)
-		r.Post("/accounts/test", adminHandler.TestAccount)
-		r.Get("/health", adminHandler.HealthCheck)
-		r.Get("/stats", adminHandler.GetStats)
+		// 不需要认证的路由
+		r.Get("/password/status", adminHandler.PasswordStatus)
+		r.Post("/password/set", adminHandler.SetPassword)
+		r.Post("/password/login", adminHandler.Login)
+
+		// 需要认证的路由
+		r.Group(func(r chi.Router) {
+			r.Use(handler.AdminAuth)
+			r.Get("/config", adminHandler.GetConfig)
+			r.Post("/config", adminHandler.UpdateConfig)
+			r.Post("/accounts", adminHandler.AddAccount)
+			r.Delete("/accounts", adminHandler.DeleteAccount)
+			r.Post("/accounts/test", adminHandler.TestAccount)
+			r.Post("/accounts/test-model", adminHandler.TestModel)
+			r.Post("/accounts/test-all-models", adminHandler.TestAllModels)
+			r.Get("/accounts/export", adminHandler.ExportAccounts)
+			r.Post("/accounts/import", adminHandler.ImportAccounts)
+			r.Put("/accounts/cookie", adminHandler.UpdateCookie)
+			r.Post("/pool/test-all", adminHandler.TestPoolAll)
+			r.Get("/health", adminHandler.HealthCheck)
+			r.Get("/stats", adminHandler.GetStats)
+			r.Post("/password/change", adminHandler.ChangePassword)
+		})
 	})
 
 	// 前端 SPA

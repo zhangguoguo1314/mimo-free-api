@@ -1,0 +1,41 @@
+name: 部署到 Hugging Face Spaces
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy-hf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 配置 Git
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+
+      - name: 克隆 HF Space 仓库
+        run: git clone https://x:${{ secrets.HF_TOKEN }}@huggingface.co/spaces/heyenba/mimo hf-space
+
+      - name: 复制文件到 HF Space
+        run: |
+          cp Dockerfile hf-space/
+          cp go.mod go.sum hf-space/
+          cp main.go hf-space/
+          cp -r internal hf-space/
+          cp -r static hf-space/
+          cp -r web hf-space/
+          cp -r browser-extension hf-space/
+          cp cmd hf-space/
+          cd hf-space
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "deploy from github actions $(date +%Y-%m-%d)"
+
+      - name: 推送到 Hugging Face
+        run: |
+          cd hf-space
+          git push https://x:${{ secrets.HF_TOKEN }}@huggingface.co/spaces/heyenba/mimo main
