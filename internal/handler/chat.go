@@ -87,11 +87,12 @@ func (h *ChatHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 // handleWebChat 使用网页端反代 — 有状态模式（复用 MiMo conversationId + parentId）
 func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, req *adapter.OpenAIChatRequest, model string, stream bool) {
-	client, err := h.pool.Next()
+	client, release, err := h.pool.Acquire()
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
+	defer release()
 
 	// Extract latest user message as query (not full history)
 	// Skip auto-generated messages like "predict next message" from MiMo Code
@@ -123,6 +124,9 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 	body, err := client.Chat(ctx, query, model, convID, parentID, false)
 	if err != nil {
 		log.Printf("[error] web chat: %v", err)
+		// 请求失败，自动标记冷却和不健康
+		h.pool.MarkCooldown(client)
+		h.pool.MarkUnhealthy(client)
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("mimo error: %v", err))
 		return
 	}
@@ -414,12 +418,13 @@ func (h *MessagesHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client, err := h.pool.Next()
+	client, release, err := h.pool.Acquire()
 	if err != nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
+	defer release()
 
 	// Extract latest user message as query (not full history)
 	hasTools := len(req.Tools) > 0
@@ -451,6 +456,9 @@ func (h *MessagesHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	body, err := client.Chat(ctx, query, routeResult.Model, convID, parentID, false)
 	if err != nil {
+		// 请求失败，自动标记冷却和不健康
+		h.pool.MarkCooldown(client)
+		h.pool.MarkUnhealthy(client)
 		w.WriteHeader(http.StatusBadGateway)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return

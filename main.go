@@ -96,6 +96,7 @@ func main() {
 			r.Post("/accounts/import", adminHandler.ImportAccounts)
 			r.Put("/accounts/cookie", adminHandler.UpdateCookie)
 			r.Post("/pool/test-all", adminHandler.TestPoolAll)
+			r.Get("/pool/status", adminHandler.PoolStatus)
 			r.Get("/health", adminHandler.HealthCheck)
 			r.Get("/stats", adminHandler.GetStats)
 			r.Post("/password/change", adminHandler.ChangePassword)

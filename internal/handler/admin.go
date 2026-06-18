@@ -300,6 +300,15 @@ func (h *AdminHandler) TestPoolAll(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// PoolStatus 返回账号池中每个账号的详细状态（并发数、冷却、速率）
+func (h *AdminHandler) PoolStatus(w http.ResponseWriter, r *http.Request) {
+	statuses := h.pool.Status()
+	writeJSON(w, map[string]interface{}{
+		"total":   len(statuses),
+		"accounts": statuses,
+	})
+}
+
 // ExportAccounts 导出所有账号（不包含敏感配置）
 func (h *AdminHandler) ExportAccounts(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
