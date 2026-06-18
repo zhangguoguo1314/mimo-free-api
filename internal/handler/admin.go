@@ -58,6 +58,7 @@ func (h *AdminHandler) AddAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	config.Update(func(cfg *config.Config) {
+		acc.Active = true // 新添加的账号默认启用
 		cfg.Accounts = append(cfg.Accounts, acc)
 	})
 	config.Save()
