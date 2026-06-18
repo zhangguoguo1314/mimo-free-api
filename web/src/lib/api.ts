@@ -91,7 +91,7 @@ export async function setPassword(password: string): Promise<{success: boolean; 
   return res.json()
 }
 
-export async function login(password: string): Promise<{success: boolean; token?: string}> {
+export async function login(password: string): Promise<{success: boolean; status?: string; token?: string}> {
   const res = await apiFetch('/admin/api/password/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
