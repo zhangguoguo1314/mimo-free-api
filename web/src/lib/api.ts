@@ -18,21 +18,21 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
 }
 
 // 模型测试
-export async function testAccountModel(accountId: string, model: string): Promise<{success: boolean; response: string; error?: string}> {
+export async function testAccountModel(accountId: string, model: string): Promise<{account_id: string; model: string; status_code: number; response?: string; error?: string}> {
   const res = await apiFetch('/admin/api/accounts/test-model', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: accountId, model })
+    body: JSON.stringify({ account_id: accountId, model })
   })
   return res.json()
 }
 
 // 测试账号所有模型
-export async function testAccountAllModels(accountId: string): Promise<{results: Array<{model: string; success: boolean; response: string; error?: string}>}> {
+export async function testAccountAllModels(accountId: string): Promise<{account_id: string; results: Array<{model: string; status_code: number; response?: string; error?: string}>}> {
   const res = await apiFetch('/admin/api/accounts/test-all-models', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: accountId })
+    body: JSON.stringify({ account_id: accountId })
   })
   return res.json()
 }

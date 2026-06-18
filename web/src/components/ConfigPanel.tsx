@@ -223,14 +223,15 @@ export function ConfigPanel() {
 
     try {
       const result = await testAccountModel(accountId, model)
+      const isSuccess = result.status_code === 200 && !!result.response
       setModelTestResults(prev => ({
         ...prev,
         [`${accountId}-${model}`]: {
           model,
           loading: false,
-          success: result.success,
-          response: result.success ? result.response.slice(0, 200) : undefined,
-          error: result.error
+          success: isSuccess,
+          response: isSuccess ? (result.response as string).slice(0, 200) : undefined,
+          error: result.error || (isSuccess ? undefined : `HTTP ${result.status_code || '未知错误'}`)
         }
       }))
     } catch (e) {

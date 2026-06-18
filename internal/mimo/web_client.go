@@ -219,8 +219,9 @@ func (c *WebClient) SaveConversation(ctx context.Context, conversationID, query 
 	}
 }
 
-// Validate 验证 Cookie 是否有效
+// Validate 验证 Cookie 是否有效（使用独立短超时client，避免阻塞主httpClient）
 func (c *WebClient) Validate(ctx context.Context) error {
+	validateClient := &http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequestWithContext(ctx, "GET", webBaseURL+"/open-apis/user/info", nil)
 	if err != nil {
 		return err
@@ -229,7 +230,9 @@ func (c *WebClient) Validate(ctx context.Context) error {
 		"userId=%s; serviceToken=%q; xiaomichatbot_ph=%q",
 		c.userID, c.serviceToken, c.ph,
 	))
-	resp, err := c.httpClient.Do(req)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36")
+	req.Header.Set("Referer", webBaseURL+"/")
+	resp, err := validateClient.Do(req)
 	if err != nil {
 		return err
 	}

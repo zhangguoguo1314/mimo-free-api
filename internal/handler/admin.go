@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -555,19 +556,55 @@ func testModelChat(ctx context.Context, acc *config.Account, model string) (stri
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
-
 	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
 		return "", resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncate(string(respBody), 500))
 	}
 
-	// 解析 SSE 流中的文本内容
-	content := extractTextFromSSE(string(respBody))
-	if content == "" {
-		content = truncate(string(respBody), 500)
+	// 流式读取 SSE，收集文本内容，避免 io.ReadAll 阻塞等待连接关闭
+	var content strings.Builder
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 64*1024), 64*1024)
+	for scanner.Scan() {
+		select {
+		case <-ctx.Done():
+			return truncate(content.String(), 500), resp.StatusCode, nil
+		default:
+		}
+		line := scanner.Text()
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "data:") {
+			data := strings.TrimPrefix(line, "data:")
+			data = strings.TrimSpace(data)
+			if data == "" || data == "[DONE]" {
+				continue
+			}
+			var evt map[string]interface{}
+			if err := json.Unmarshal([]byte(data), &evt); err != nil {
+				continue
+			}
+			if choices, ok := evt["choices"].([]interface{}); ok && len(choices) > 0 {
+				if choice, ok := choices[0].(map[string]interface{}); ok {
+					if delta, ok := choice["delta"].(map[string]interface{}); ok {
+						if text, ok := delta["text"].(string); ok {
+							content.WriteString(text)
+						}
+					}
+				}
+			}
+			if evtData, ok := evt["data"].(map[string]interface{}); ok {
+				if text, ok := evtData["text"].(string); ok {
+					content.WriteString(text)
+				}
+			}
+		}
 	}
 
-	return truncate(content, 500), resp.StatusCode, nil
+	result := content.String()
+	if result == "" {
+		result = "(模型响应成功但内容为空)"
+	}
+	return truncate(result, 500), resp.StatusCode, nil
 }
 
 // extractTextFromSSE 从 SSE 响应中提取文本内容

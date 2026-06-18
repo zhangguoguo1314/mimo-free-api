@@ -83,13 +83,32 @@ func (p *Pool) Count() int {
 }
 
 func (p *Pool) HealthCheck(ctx context.Context) map[string]bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	results := make(map[string]bool)
-	for _, e := range p.clients {
-		err := e.client.Validate(ctx)
-		e.healthy = err == nil
-		results[e.account.ID] = e.healthy
+	// 先读取账号列表（读锁），再逐个验证（不持锁），最后更新状态（写锁）
+	type entry struct {
+		id      string
+		client  *mimo.WebClient
 	}
+	var entries []entry
+	p.mu.RLock()
+	for _, e := range p.clients {
+		entries = append(entries, entry{id: e.account.ID, client: e.client})
+	}
+	p.mu.RUnlock()
+
+	results := make(map[string]bool)
+	for _, ent := range entries {
+		err := ent.client.Validate(ctx)
+		results[ent.id] = err == nil
+	}
+
+	// 更新健康状态
+	p.mu.Lock()
+	for _, e := range p.clients {
+		if healthy, ok := results[e.account.ID]; ok {
+			e.healthy = healthy
+		}
+	}
+	p.mu.Unlock()
+
 	return results
 }
