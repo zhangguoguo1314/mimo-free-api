@@ -58,7 +58,7 @@ export function LoginPage({ mode, onSuccess }: LoginPageProps) {
     setError('')
     try {
       const result = await apiSetPassword(password)
-      if (result.success) {
+      if (result.success || result.status === 'ok') {
         // After setting password, auto-login
         const loginResult = await apiLogin(password)
         if (loginResult.success && loginResult.token) {
