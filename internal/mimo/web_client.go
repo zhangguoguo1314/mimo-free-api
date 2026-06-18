@@ -31,6 +31,14 @@ type WebClient struct {
 
 // NewWebClient 创建网页端客户端
 func NewWebClient(serviceToken, userID, ph string) *WebClient {
+	// 清理 token 首尾的空格和引号
+	serviceToken = strings.TrimSpace(serviceToken)
+	serviceToken = strings.Trim(serviceToken, "\"")
+	userID = strings.TrimSpace(userID)
+	userID = strings.Trim(userID, "\"")
+	ph = strings.TrimSpace(ph)
+	ph = strings.Trim(ph, "\"")
+
 	return &WebClient{
 		httpClient:   &http.Client{Timeout: 30 * time.Minute},
 		serviceToken: serviceToken,

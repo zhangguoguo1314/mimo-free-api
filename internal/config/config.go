@@ -17,11 +17,15 @@ type Config struct {
 
 // Account 网页端账号配置
 type Account struct {
-	ID           string `json:"id"`
-	ServiceToken string `json:"service_token"`
-	UserID       string `json:"user_id"`
-	Ph           string `json:"ph"`
-	Active       bool   `json:"active"`
+	ID               string `json:"id"`
+	ServiceToken     string `json:"service_token"`
+	UserID           string `json:"user_id"`
+	Ph               string `json:"ph"`
+	Active           bool   `json:"active"`
+	Source           string `json:"source,omitempty"`
+	AddedAt          int64  `json:"added_at,omitempty"`
+	LastValidatedAt  int64  `json:"last_validated_at,omitempty"`
+	ExpiresAt        int64  `json:"expires_at,omitempty"`
 }
 
 var (
@@ -57,7 +61,7 @@ func Save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(path, data, 0600)
 }
 
 func Update(fn func(*Config)) {

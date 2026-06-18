@@ -38,7 +38,8 @@ type entry struct {
 	healthy    bool
 	active     int32         // 当前正在处理的请求数（原子操作）
 	cooldownAt atomic.Int64 // 冷却截止时间（unix nano，0 表示无冷却）
-	timestamps []int64      // 滑动窗口时间戳，用于速率限制
+	tsMu       sync.Mutex    // 保护 timestamps 的互斥锁
+	timestamps []int64       // 滑动窗口时间戳，用于速率限制
 }
 
 func New(accounts []config.Account) *Pool {
@@ -143,6 +144,7 @@ func (p *Pool) isAvailable(e *entry, now time.Time) bool {
 	}
 
 	// 速率检查（滑动窗口：最近 60 秒内的请求数）
+	e.tsMu.Lock()
 	if len(e.timestamps) >= p.cfg.RateLimit {
 		cutoff := now.Add(-60 * time.Second).UnixNano()
 		// 清理过期时间戳
@@ -155,15 +157,19 @@ func (p *Pool) isAvailable(e *entry, now time.Time) bool {
 		}
 		e.timestamps = e.timestamps[:j]
 		if len(e.timestamps) >= p.cfg.RateLimit {
+			e.tsMu.Unlock()
 			return false
 		}
 	}
+	e.tsMu.Unlock()
 
 	return true
 }
 
 // addTimestamp 记录请求时间戳
 func (e *entry) addTimestamp(now time.Time) {
+	e.tsMu.Lock()
+	defer e.tsMu.Unlock()
 	cutoff := now.Add(-60 * time.Second).UnixNano()
 	j := 0
 	for _, ts := range e.timestamps {
@@ -226,6 +232,8 @@ func (p *Pool) Status() []AccountStatus {
 			RateUsed:         len(e.timestamps),
 			RateLimit:        p.cfg.RateLimit,
 			MaxConcurrent:    p.cfg.MaxConcurrent,
+			Source:           e.account.Source,
+			AddedAt:          formatTimestamp(e.account.AddedAt),
 		})
 	}
 	return statuses
@@ -240,6 +248,8 @@ type AccountStatus struct {
 	RateUsed          int
 	RateLimit         int
 	MaxConcurrent     int
+	Source            string
+	AddedAt           string
 }
 
 func (p *Pool) HasAccounts() bool {
@@ -251,18 +261,74 @@ func (p *Pool) HasAccounts() bool {
 func (p *Pool) Reload(accounts []config.Account) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.clients = nil
+
+	// 构建新账号的 ID -> Account 映射
+	newMap := make(map[string]config.Account)
 	for _, acc := range accounts {
-		if !acc.Active {
-			continue
+		if acc.Active {
+			newMap[acc.ID] = acc
 		}
-		p.clients = append(p.clients, &entry{
-			account:    acc,
-			client:     mimo.NewWebClient(acc.ServiceToken, acc.UserID, acc.Ph),
-			healthy:    true,
-			timestamps: make([]int64, 0, p.cfg.RateLimit),
-		})
 	}
+
+	// 构建旧账号的 ID -> entry 映射
+	oldMap := make(map[string]*entry)
+	for _, e := range p.clients {
+		oldMap[e.account.ID] = e
+	}
+
+	// 计算新增、删除、变更
+	var newClients []*entry
+	for id, acc := range newMap {
+		if old, exists := oldMap[id]; exists {
+			// 已存在：检查是否有变更（比较关键字段）
+			if old.account.ServiceToken == acc.ServiceToken &&
+				old.account.UserID == acc.UserID &&
+				old.account.Ph == acc.Ph {
+				// 无变更，保留原有 entry（包括 WebClient 和状态）
+				old.account = acc // 更新元数据（Source, AddedAt 等）
+				newClients = append(newClients, old)
+			} else {
+				// 有变更：创建新 entry
+				newClients = append(newClients, &entry{
+					account:    acc,
+					client:     mimo.NewWebClient(acc.ServiceToken, acc.UserID, acc.Ph),
+					healthy:    true,
+					timestamps: make([]int64, 0, p.cfg.RateLimit),
+				})
+			}
+		} else {
+			// 新增账号
+			newClients = append(newClients, &entry{
+				account:    acc,
+				client:     mimo.NewWebClient(acc.ServiceToken, acc.UserID, acc.Ph),
+				healthy:    true,
+				timestamps: make([]int64, 0, p.cfg.RateLimit),
+			})
+		}
+	}
+	// 已删除的账号不在 newMap 中，自动被丢弃
+
+	p.clients = newClients
+}
+
+// GetClientByID 根据 ID 获取 WebClient
+func (p *Pool) GetClientByID(id string) *mimo.WebClient {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	for _, e := range p.clients {
+		if e.account.ID == id {
+			return e.client
+		}
+	}
+	return nil
+}
+
+// formatTimestamp 将 unix nano 时间戳格式化为可读字符串
+func formatTimestamp(ts int64) string {
+	if ts == 0 {
+		return ""
+	}
+	return time.Unix(0, ts).Format("2006-01-02 15:04:05")
 }
 
 func (p *Pool) Count() int {

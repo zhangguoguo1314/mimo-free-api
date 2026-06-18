@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -39,6 +41,23 @@ func main() {
 
 	// 初始化账号池
 	accountPool := pool.New(cfg.Accounts)
+
+	// 启动后台定时健康检查（每 10 分钟）
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			log.Printf("[health-check] starting periodic health check...")
+			results := accountPool.HealthCheck(context.Background())
+			healthy := 0
+			for _, ok := range results {
+				if ok {
+					healthy++
+				}
+			}
+			log.Printf("[health-check] completed: %d/%d healthy", healthy, len(results))
+		}
+	}()
 
 	// 路由
 	r := chi.NewRouter()

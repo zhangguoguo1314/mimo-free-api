@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -16,6 +17,16 @@ import (
 	"github.com/zhangguoguo1314/mimo-free-api/internal/pool"
 	"github.com/zhangguoguo1314/mimo-free-api/internal/stats"
 )
+
+// cleanToken 清理 token 字符串首尾的空格和引号
+func cleanToken(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.Trim(s, "\"")
+	return s
+}
+
+// validIDPattern 校验 ID 格式
+var validIDPattern = regexp.MustCompile(`^[a-zA-Z0-9._-]{2,64}$`)
 
 type AdminHandler struct {
 	pool *pool.Pool
@@ -53,16 +64,65 @@ func (h *AdminHandler) AddAccount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
+
+	// 清理所有字段
+	acc.ID = cleanToken(acc.ID)
+	acc.ServiceToken = cleanToken(acc.ServiceToken)
+	acc.UserID = cleanToken(acc.UserID)
+	acc.Ph = cleanToken(acc.Ph)
+
 	if acc.ID == "" {
 		writeError(w, http.StatusBadRequest, "id is required")
 		return
 	}
+
+	// ID 格式校验
+	if !validIDPattern.MatchString(acc.ID) {
+		writeError(w, http.StatusBadRequest, "id format invalid, only alphanumeric, dot, hyphen, underscore allowed (2-64 chars)")
+		return
+	}
+
+	// 设置来源和时间戳
+	acc.Source = "manual"
+	acc.AddedAt = time.Now().UnixNano()
+
+	var duplicate bool
 	config.Update(func(cfg *config.Config) {
+		// 重复检测
+		for _, existing := range cfg.Accounts {
+			if existing.ID == acc.ID {
+				duplicate = true
+				return
+			}
+		}
 		acc.Active = true // 新添加的账号默认启用
 		cfg.Accounts = append(cfg.Accounts, acc)
 	})
+	if duplicate {
+		writeError(w, http.StatusConflict, "account id already exists")
+		return
+	}
 	config.Save()
 	h.pool.Reload(config.Get().Accounts)
+
+	// 异步验证新账号
+	go func() {
+		accCopy := acc
+		if !testAccountValidity(&accCopy) {
+			// 找到对应的 WebClient 并标记不健康
+			cfg := config.Get()
+			for _, a := range cfg.Accounts {
+				if a.ID == acc.ID {
+					client := h.pool.GetClientByID(acc.ID)
+					if client != nil {
+						h.pool.MarkUnhealthy(client)
+					}
+					break
+				}
+			}
+		}
+	}()
+
 	writeJSON(w, map[string]string{"status": "added"})
 }
 
@@ -141,6 +201,11 @@ func (h *AdminHandler) TestAccount(w http.ResponseWriter, r *http.Request) {
 
 // testAccountValidity 测试账号是否有效（通过发送一条简短chat消息验证）
 func testAccountValidity(acc *config.Account) bool {
+	// 清理字段
+	acc.Ph = cleanToken(acc.Ph)
+	acc.ServiceToken = cleanToken(acc.ServiceToken)
+	acc.UserID = cleanToken(acc.UserID)
+
 	client := &http.Client{Timeout: 15 * time.Second}
 
 	const webBaseURL = "https://aistudio.xiaomimimo.com"
@@ -309,17 +374,38 @@ func (h *AdminHandler) PoolStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ExportAccounts 导出所有账号（不包含敏感配置）
+// ExportAccounts 导出所有账号（默认脱敏，?full=true 导出完整信息）
 func (h *AdminHandler) ExportAccounts(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
+	full := r.URL.Query().Get("full") == "true"
+
 	export := make([]config.Account, len(cfg.Accounts))
 	for i, acc := range cfg.Accounts {
-		export[i] = config.Account{
-			ID:           acc.ID,
-			ServiceToken: acc.ServiceToken,
-			UserID:       acc.UserID,
-			Ph:           acc.Ph,
-			Active:       acc.Active,
+		if full {
+			export[i] = acc
+		} else {
+			// 脱敏导出
+			maskedToken := acc.ServiceToken
+			if len(maskedToken) > 8 {
+				maskedToken = maskedToken[:8] + "..."
+			}
+			maskedUserID := acc.UserID
+			if len(maskedUserID) > 4 {
+				maskedUserID = maskedUserID[:4] + "..."
+			}
+			maskedPh := acc.Ph
+			if len(maskedPh) > 4 {
+				maskedPh = maskedPh[:4] + "..."
+			}
+			export[i] = config.Account{
+				ID:           acc.ID,
+				ServiceToken: maskedToken,
+				UserID:       maskedUserID,
+				Ph:           maskedPh,
+				Active:       acc.Active,
+				Source:       acc.Source,
+				AddedAt:      acc.AddedAt,
+			}
 		}
 	}
 
@@ -342,7 +428,9 @@ func (h *AdminHandler) ImportAccounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var added, skipped, failed int
+	var added, skipped int
+	var importErrors []map[string]string
+
 	config.Update(func(cfg *config.Config) {
 		existingIDs := make(map[string]bool)
 		for _, acc := range cfg.Accounts {
@@ -350,14 +438,37 @@ func (h *AdminHandler) ImportAccounts(w http.ResponseWriter, r *http.Request) {
 		}
 
 		for _, acc := range accounts {
+			// 清理所有字段
+			acc.ID = cleanToken(acc.ID)
+			acc.ServiceToken = cleanToken(acc.ServiceToken)
+			acc.UserID = cleanToken(acc.UserID)
+			acc.Ph = cleanToken(acc.Ph)
+
 			if acc.ID == "" || acc.ServiceToken == "" || acc.UserID == "" || acc.Ph == "" {
-				failed++
+				importErrors = append(importErrors, map[string]string{
+					"id":     acc.ID,
+					"reason": "missing required fields (id, service_token, user_id, ph)",
+				})
 				continue
 			}
+
+			// ID 格式校验
+			if !validIDPattern.MatchString(acc.ID) {
+				importErrors = append(importErrors, map[string]string{
+					"id":     acc.ID,
+					"reason": "id format invalid",
+				})
+				continue
+			}
+
 			if existingIDs[acc.ID] {
 				skipped++
 				continue
 			}
+
+			// 设置来源和时间戳
+			acc.Source = "file"
+			acc.AddedAt = time.Now().UnixNano()
 			cfg.Accounts = append(cfg.Accounts, acc)
 			existingIDs[acc.ID] = true
 			added++
@@ -366,12 +477,15 @@ func (h *AdminHandler) ImportAccounts(w http.ResponseWriter, r *http.Request) {
 	config.Save()
 	h.pool.Reload(config.Get().Accounts)
 
-	writeJSON(w, map[string]interface{}{
+	resp := map[string]interface{}{
 		"status":  "ok",
 		"added":   added,
 		"skipped": skipped,
-		"failed":  failed,
-	})
+	}
+	if len(importErrors) > 0 {
+		resp["errors"] = importErrors
+	}
+	writeJSON(w, resp)
 }
 
 // UpdateCookie 更新账号的 Cookie 字段
@@ -386,6 +500,13 @@ func (h *AdminHandler) UpdateCookie(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
+
+	// 清理所有字段
+	req.AccountID = cleanToken(req.AccountID)
+	req.ServiceToken = cleanToken(req.ServiceToken)
+	req.UserID = cleanToken(req.UserID)
+	req.Ph = cleanToken(req.Ph)
+
 	if req.AccountID == "" {
 		writeError(w, http.StatusBadRequest, "account_id is required")
 		return
@@ -416,6 +537,23 @@ func (h *AdminHandler) UpdateCookie(w http.ResponseWriter, r *http.Request) {
 	}
 	config.Save()
 	h.pool.Reload(config.Get().Accounts)
+
+	// 异步验证新 cookie
+	go func() {
+		cfg := config.Get()
+		for _, acc := range cfg.Accounts {
+			if acc.ID == req.AccountID {
+				accCopy := acc
+				if !testAccountValidity(&accCopy) {
+					client := h.pool.GetClientByID(req.AccountID)
+					if client != nil {
+						h.pool.MarkUnhealthy(client)
+					}
+				}
+				break
+			}
+		}
+	}()
 
 	// 返回更新后的账号信息
 	cfg := config.Get()
