@@ -57,7 +57,7 @@ export function ConfigPanel() {
 
   // Pool test state
   const [poolTesting, setPoolTesting] = useState(false)
-  const [poolTestResults, setPoolTestResults] = useState<Array<{id: string; healthy: boolean; error?: string}> | null>(null)
+  const [poolTestResults, setPoolTestResults] = useState<Record<string, boolean> | null>(null)
 
   // Import/Export state
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -522,13 +522,12 @@ export function ConfigPanel() {
                   </button>
                 </div>
                 <div className="space-y-1">
-                  {poolTestResults.map(r => (
-                    <div key={r.id} className={`flex items-center gap-2 text-xs ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-                      <span className={r.healthy ? 'text-emerald-500' : 'text-red-500'}>
-                        {r.healthy ? '✓' : '✗'}
+                  {Object.entries(poolTestResults).map(([id, healthy]) => (
+                    <div key={id} className={`flex items-center gap-2 text-xs ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                      <span className={healthy ? 'text-emerald-500' : 'text-red-500'}>
+                        {healthy ? '✓' : '✗'}
                       </span>
-                      <span className="font-mono">{r.id}</span>
-                      {r.error && <span className="text-red-400">{r.error}</span>}
+                      <span className="font-mono">{id}</span>
                     </div>
                   ))}
                 </div>

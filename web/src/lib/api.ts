@@ -38,7 +38,7 @@ export async function testAccountAllModels(accountId: string): Promise<{account_
 }
 
 // 账号池全量测试
-export async function testPoolAll(): Promise<{results: Array<{id: string; healthy: boolean; error?: string}>}> {
+export async function testPoolAll(): Promise<{results: Record<string, boolean>; healthy: number; total: number}> {
   const res = await apiFetch('/admin/api/pool/test-all', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' }
