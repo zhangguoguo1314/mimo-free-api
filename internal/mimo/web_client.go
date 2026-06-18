@@ -270,8 +270,8 @@ func (c *WebClient) Validate(ctx context.Context) error {
 		return err
 	}
 	defer resp.Body.Close()
-	// 读取并丢弃响应体
-	io.Copy(io.Discard, resp.Body)
+	// 只读取少量数据确认响应开始，避免SSE长连接阻塞
+	io.CopyN(io.Discard, resp.Body, 4096)
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("invalid: status %d", resp.StatusCode)
 	}
