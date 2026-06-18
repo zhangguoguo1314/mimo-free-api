@@ -139,24 +139,54 @@ func (h *AdminHandler) TestAccount(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// testAccountValidity 测试账号是否有效
+// testAccountValidity 测试账号是否有效（通过发送一条简短chat消息验证）
 func testAccountValidity(acc *config.Account) bool {
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: 15 * time.Second}
 
-	req, err := http.NewRequest("GET", "https://aistudio.xiaomimimo.com/open-apis/user/info", nil)
+	const webBaseURL = "https://aistudio.xiaomimimo.com"
+	encodedPh := url.QueryEscape(acc.Ph)
+	reqURL := fmt.Sprintf("%s/open-apis/bot/chat?xiaomichatbot_ph=%s", webBaseURL, encodedPh)
+
+	reqBody := map[string]interface{}{
+		"msgId":          uuid.New().String(),
+		"conversationId": uuid.New().String(),
+		"query":          "hi",
+		"messages":       []interface{}{},
+		"parentId":       "0",
+		"save":           false,
+		"isEditedQuery":  false,
+		"source":         "STATION",
+		"scene":          "STATION",
+		"isLocal":        false,
+		"modelConfig": map[string]interface{}{
+			"enableThinking":  false,
+			"webSearchStatus": "disabled",
+			"model":           "mimo-v2.5",
+			"temperature":     0.8,
+			"topP":            0.95,
+		},
+		"multiMedias": []interface{}{},
+	}
+
+	body, err := json.Marshal(reqBody)
 	if err != nil {
 		return false
 	}
 
-	// Cookie 格式与 WebClient.Validate 一致
+	req, err := http.NewRequest("POST", reqURL, bytes.NewReader(body))
+	if err != nil {
+		return false
+	}
+
 	cookie := fmt.Sprintf("userId=%s; serviceToken=%q; xiaomichatbot_ph=%q",
 		acc.UserID, acc.ServiceToken, acc.Ph)
 
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Cookie", cookie)
+	req.Header.Set("Origin", webBaseURL)
+	req.Header.Set("Referer", webBaseURL+"/")
+	req.Header.Set("x-timezone", "Asia/Shanghai")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.0")
-	req.Header.Set("Accept", "*/*")
-	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
-	req.Header.Set("Referer", "https://aistudio.xiaomimimo.com/")
 
 	resp, err := client.Do(req)
 	if err != nil {

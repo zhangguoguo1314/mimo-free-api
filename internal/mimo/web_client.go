@@ -219,24 +219,59 @@ func (c *WebClient) SaveConversation(ctx context.Context, conversationID, query 
 	}
 }
 
-// Validate 验证 Cookie 是否有效（使用独立短超时client，避免阻塞主httpClient）
+// Validate 验证 Cookie 是否有效（通过发送一条简短chat消息验证，避免user/info端点导致进程崩溃）
 func (c *WebClient) Validate(ctx context.Context) error {
-	validateClient := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, "GET", webBaseURL+"/open-apis/user/info", nil)
+	validateClient := &http.Client{Timeout: 15 * time.Second}
+
+	encodedPh := url.QueryEscape(c.ph)
+	reqURL := fmt.Sprintf("%s/open-apis/bot/chat?xiaomichatbot_ph=%s", webBaseURL, encodedPh)
+
+	reqBody := map[string]interface{}{
+		"msgId":          uuid.New().String(),
+		"conversationId": uuid.New().String(),
+		"query":          "hi",
+		"messages":       []interface{}{},
+		"parentId":       "0",
+		"save":           false,
+		"isEditedQuery":  false,
+		"source":         "STATION",
+		"scene":          "STATION",
+		"isLocal":        false,
+		"modelConfig": map[string]interface{}{
+			"enableThinking":  false,
+			"webSearchStatus": "disabled",
+			"model":           "mimo-v2.5",
+			"temperature":     0.8,
+			"topP":            0.95,
+		},
+		"multiMedias": []interface{}{},
+	}
+
+	body, err := json.Marshal(reqBody)
 	if err != nil {
 		return err
 	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", webBaseURL)
+	req.Header.Set("Referer", webBaseURL+"/")
+	req.Header.Set("x-timezone", "Asia/Shanghai")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36")
 	req.Header.Set("Cookie", fmt.Sprintf(
 		"userId=%s; serviceToken=%q; xiaomichatbot_ph=%q",
 		c.userID, c.serviceToken, c.ph,
 	))
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36")
-	req.Header.Set("Referer", webBaseURL+"/")
 	resp, err := validateClient.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
+	// 读取并丢弃响应体
+	io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("invalid: status %d", resp.StatusCode)
 	}
