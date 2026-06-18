@@ -617,7 +617,7 @@ func extractTextFromSSE(sseBody string) string {
 			if err := json.Unmarshal([]byte(data), &evt); err != nil {
 				continue
 			}
-			// 尝试提取文本内容
+			// OpenAI 格式: choices[0].delta.text
 			if choices, ok := evt["choices"].([]interface{}); ok && len(choices) > 0 {
 				if choice, ok := choices[0].(map[string]interface{}); ok {
 					if delta, ok := choice["delta"].(map[string]interface{}); ok {
@@ -627,9 +627,16 @@ func extractTextFromSSE(sseBody string) string {
 					}
 				}
 			}
-			// 也尝试从 event.data 中提取
+			// MiMo 格式: event:message -> data.content
+			if text, ok := evt["content"].(string); ok {
+				content.WriteString(text)
+			}
+			// 也尝试从嵌套 data 中提取
 			if evtData, ok := evt["data"].(map[string]interface{}); ok {
 				if text, ok := evtData["text"].(string); ok {
+					content.WriteString(text)
+				}
+				if text, ok := evtData["content"].(string); ok {
 					content.WriteString(text)
 				}
 			}
