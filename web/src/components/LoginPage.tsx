@@ -28,7 +28,7 @@ export function LoginPage({ mode, onSuccess }: LoginPageProps) {
     setError('')
     try {
       const result = await apiLogin(password)
-      if (result.success && result.token) {
+      if ((result.success || result.status === 'ok') && result.token) {
         localStorage.setItem('admin_token', result.token)
         onSuccess()
       } else {
@@ -61,7 +61,7 @@ export function LoginPage({ mode, onSuccess }: LoginPageProps) {
       if (result.success || result.status === 'ok') {
         // After setting password, auto-login
         const loginResult = await apiLogin(password)
-        if (loginResult.success && loginResult.token) {
+      if ((loginResult.success || loginResult.status === 'ok') && loginResult.token) {
           localStorage.setItem('admin_token', loginResult.token)
           onSuccess()
         }
