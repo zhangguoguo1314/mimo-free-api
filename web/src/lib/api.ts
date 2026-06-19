@@ -37,6 +37,25 @@ export async function testAccountAllModels(accountId: string): Promise<{account_
   return res.json()
 }
 
+export interface PoolStatus {
+  id: string
+  healthy: boolean
+  active: number
+  rate_used: number
+  rate_limit: number
+  cooldown_remaining: number
+  daily_used: number
+  daily_limit: number
+  fail429_count: number
+  source: string
+  added_at: number
+}
+
+export async function fetchPoolStatus(): Promise<{ total: number; accounts: PoolStatus[] }> {
+  const res = await apiFetch('/admin/api/pool/status')
+  return res.json()
+}
+
 // 账号池全量测试
 export async function testPoolAll(): Promise<{results: Record<string, boolean>; healthy: number; total: number}> {
   const res = await apiFetch('/admin/api/pool/test-all', {

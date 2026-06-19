@@ -131,8 +131,7 @@ func (h *AdminHandler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 		ID string `json:"id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "id is required"})
+		writeError(w, http.StatusBadRequest, "id is required")
 		return
 	}
 	found := false
@@ -186,8 +185,7 @@ func (h *AdminHandler) TestAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if account == nil {
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{"error": "account not found"})
+		writeError(w, http.StatusNotFound, "account not found")
 		return
 	}
 

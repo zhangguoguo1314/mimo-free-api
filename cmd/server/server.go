@@ -1,9 +1,6 @@
 package server
 
 import (
-	"embed"
-	"io/fs"
-	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -11,12 +8,10 @@ import (
 	"github.com/go-chi/cors"
 
 	"github.com/zhangguoguo1314/mimo-free-api/internal/config"
+	"github.com/zhangguoguo1314/mimo-free-api/internal/convstore"
 	"github.com/zhangguoguo1314/mimo-free-api/internal/handler"
 	"github.com/zhangguoguo1314/mimo-free-api/internal/pool"
 )
-
-//go:embed all:../../static
-var staticFiles embed.FS
 
 // New 创建并返回 HTTP server
 func New(cfg *config.Config, pool *pool.Pool) http.Handler {
@@ -65,8 +60,9 @@ func New(cfg *config.Config, pool *pool.Pool) http.Handler {
 		})
 	}
 
-	chatHandler := handler.NewChatHandler(pool)
-	messagesHandler := handler.NewMessagesHandler(pool)
+	convStore := convstore.New()
+	chatHandler := handler.NewChatHandler(pool, convStore)
+	messagesHandler := handler.NewMessagesHandler(pool, convStore)
 	adminHandler := handler.NewAdminHandler(pool)
 
 	// OpenAI 兼容路由
@@ -94,28 +90,6 @@ func New(cfg *config.Config, pool *pool.Pool) http.Handler {
 		r.Post("/config", adminHandler.UpdateConfig)
 		r.Post("/accounts", adminHandler.AddAccount)
 		r.Get("/health", adminHandler.HealthCheck)
-	})
-
-	// 前端 SPA
-	staticFS, _ := fs.Sub(staticFiles, "static")
-	fileServer := http.FileServer(http.FS(staticFS))
-	r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
-		// 尝试提供静态文件，否则回退到 index.html
-		path := r.URL.Path
-		if path == "/" {
-			path = "/index.html"
-		}
-		// 检查文件是否存在
-		if f, err := staticFS.(fs.ReadFileFS).ReadFile(path[1:]); err == nil {
-			w.Write(f)
-			return
-		}
-		// SPA fallback
-		if indexFile, err := staticFS.(fs.ReadFileFS).ReadFile("index.html"); err == nil {
-			w.Write(indexFile)
-			return
-		}
-		fileServer.ServeHTTP(w, r)
 	})
 
 	return r

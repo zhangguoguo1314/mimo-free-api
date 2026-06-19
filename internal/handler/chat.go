@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
 	"github.com/zhangguoguo1314/mimo-free-api/internal/adapter"
 	"github.com/zhangguoguo1314/mimo-free-api/internal/convstore"
 	"github.com/zhangguoguo1314/mimo-free-api/internal/mimo"
@@ -20,6 +21,22 @@ import (
 	"github.com/zhangguoguo1314/mimo-free-api/internal/stats"
 	"github.com/zhangguoguo1314/mimo-free-api/internal/toolcall"
 )
+
+// min returns the smaller of a and b.
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// max returns the larger of a and b.
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
 
 type ChatHandler struct {
 	pool      *pool.Pool
@@ -185,10 +202,10 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 		close(hasContentChan)
 	}()
 
-	if stream {
+	if req.Stream {
 		h.streamWebToOpenAI(w, model, msgChan, len(req.Tools) > 0)
 	} else {
-		h.nonStreamWebToOpenAI(w, model, msgChan)
+		h.nonStreamWebToOpenAI(w, model, msgChan, len(req.Tools) > 0)
 	}
 
 	// 后处理：记录 usage，保存对话映射
@@ -222,7 +239,11 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 }
 
 func (h *ChatHandler) streamWebToOpenAI(w http.ResponseWriter, model string, events <-chan mimo.WebSSEEvent, hasTools bool) {
-	flusher := w.(http.Flusher)
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		// Fallback: buffer all and write at once (should not happen with HTTP/1.1)
+		flusher = &noopFlusher{}
+	}
 	inThinking := false
 
 	var buffered strings.Builder
@@ -258,21 +279,27 @@ func (h *ChatHandler) streamWebToOpenAI(w http.ResponseWriter, model string, eve
 	}
 
 	finalText := strings.TrimSpace(buffered.String())
-	log.Printf("[tools] raw output (len=%d): %q", len(finalText), finalText[:min(len(finalText), 500)])
-	if toolcall.HasToolCallSyntax(finalText) {
-		calls := toolcall.ParseToolCallsFromText(finalText)
-		log.Printf("[tools] parsed %d calls from text", len(calls))
-		for i, c := range calls {
-			log.Printf("[tools] call[%d]: name=%s input=%v", i, c.Name, c.Input)
-		}
-		if len(calls) > 0 {
-			toolCalls := toolcall.ConvertToolCallsToOpenAI(calls)
-			log.Printf("[tools] detected %d tool calls in stream", len(toolCalls))
-			toolChunk := adapter.MakeOpenAIStreamToolCallChunk(model, toolCalls, true)
-			fmt.Fprintf(w, "data: %s\n\n", toolChunk)
-			fmt.Fprintf(w, "data: [DONE]\n\n")
-			flusher.Flush()
-			return
+	if hasTools && len(finalText) > 0 {
+		log.Printf("[tools] raw output (len=%d): %q", len(finalText), finalText[:min(len(finalText), 500)])
+		if toolcall.HasToolCallSyntax(finalText) {
+			calls := toolcall.ParseToolCallsFromText(finalText)
+			log.Printf("[tools] parsed %d calls from text", len(calls))
+			for i, c := range calls {
+				log.Printf("[tools] call[%d]: name=%s input=%v", i, c.Name, c.Input)
+			}
+			if len(calls) > 0 {
+				toolCalls := toolcall.ConvertToolCallsToOpenAI(calls)
+				log.Printf("[tools] detected %d tool calls in stream", len(toolCalls))
+				// First send a finish chunk with empty content to signal end of text
+				finishChunk := adapter.MakeOpenAIStreamChunk(model, "", true)
+				fmt.Fprintf(w, "data: %s\n\n", finishChunk)
+				// Then send the tool_calls chunk
+				toolChunk := adapter.MakeOpenAIStreamToolCallChunk(model, toolCalls, true)
+				fmt.Fprintf(w, "data: %s\n\n", toolChunk)
+				fmt.Fprintf(w, "data: [DONE]\n\n")
+				flusher.Flush()
+				return
+			}
 		}
 	}
 
@@ -280,6 +307,11 @@ func (h *ChatHandler) streamWebToOpenAI(w http.ResponseWriter, model string, eve
 	fmt.Fprintf(w, "data: [DONE]\n\n")
 	flusher.Flush()
 }
+
+// noopFlusher is a fallback flusher that does nothing
+type noopFlusher struct{}
+
+func (n *noopFlusher) Flush() {}
 
 // filterThinkingChunk 状态机方式过滤 thinking 内容
 func filterThinkingChunk(content string, inThinking bool) (string, bool) {
@@ -310,7 +342,7 @@ func filterThinkingChunk(content string, inThinking bool) (string, bool) {
 	return result.String(), inThinking
 }
 
-func (h *ChatHandler) nonStreamWebToOpenAI(w http.ResponseWriter, model string, events <-chan mimo.WebSSEEvent) {
+func (h *ChatHandler) nonStreamWebToOpenAI(w http.ResponseWriter, model string, events <-chan mimo.WebSSEEvent, hasTools bool) {
 	var content strings.Builder
 	inThinking := false
 
@@ -332,25 +364,26 @@ func (h *ChatHandler) nonStreamWebToOpenAI(w http.ResponseWriter, model string, 
 		}
 	}
 
-
 	finalText := strings.TrimSpace(content.String())
 
 	// 检测是否包含工具调用
-	log.Printf("[tools] non-stream raw output (len=%d): %q", len(finalText), finalText[:min(len(finalText), 500)])
-	if toolcall.HasToolCallSyntax(finalText) {
-		calls := toolcall.ParseToolCallsFromText(finalText)
-		log.Printf("[tools] non-stream parsed %d calls", len(calls))
-		for i, c := range calls {
-			log.Printf("[tools] call[%d]: name=%s input=%v", i, c.Name, c.Input)
-		}
-		if len(calls) > 0 {
-			toolCalls := toolcall.ConvertToolCallsToOpenAI(calls)
-			log.Printf("[tools] detected %d tool calls in response", len(toolCalls))
-			resp := adapter.MakeOpenAIToolCallResponse(model, toolCalls)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			w.Write(resp)
-			return
+	if hasTools && len(finalText) > 0 {
+		log.Printf("[tools] non-stream raw output (len=%d): %q", len(finalText), finalText[:min(len(finalText), 500)])
+		if toolcall.HasToolCallSyntax(finalText) {
+			calls := toolcall.ParseToolCallsFromText(finalText)
+			log.Printf("[tools] non-stream parsed %d calls", len(calls))
+			for i, c := range calls {
+				log.Printf("[tools] call[%d]: name=%s input=%v", i, c.Name, c.Input)
+			}
+			if len(calls) > 0 {
+				toolCalls := toolcall.ConvertToolCallsToOpenAI(calls)
+				log.Printf("[tools] detected %d tool calls in response", len(toolCalls))
+				resp := adapter.MakeOpenAIToolCallResponse(model, toolCalls)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				w.Write(resp)
+				return
+			}
 		}
 	}
 
@@ -363,7 +396,9 @@ func (h *ChatHandler) nonStreamWebToOpenAI(w http.ResponseWriter, model string, 
 func toMiMoMessages(msgs []adapter.OpenAIMessage) []mimo.Message {
 	result := make([]mimo.Message, len(msgs))
 	for i, m := range msgs {
-		result[i] = mimo.Message{Role: m.Role, Content: m.Content}
+		// MiMo expects string content, extract text from multimodal arrays
+		content := extractContentString(m.Content)
+		result[i] = mimo.Message{Role: m.Role, Content: content}
 	}
 	return result
 }
@@ -448,8 +483,7 @@ func NewMessagesHandler(p *pool.Pool, cs *convstore.Store) *MessagesHandler {
 func (h *MessagesHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	var req adapter.AnthropicRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
@@ -459,15 +493,13 @@ func (h *MessagesHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if !h.pool.HasAccounts() {
-		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(map[string]string{"error": "no accounts configured"})
+		writeError(w, http.StatusServiceUnavailable, "no accounts configured")
 		return
 	}
 
 	client, release, err := h.pool.Acquire()
 	if err != nil {
-		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
 	defer release()
@@ -478,8 +510,7 @@ func (h *MessagesHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	if query == "" {
 		// All user messages were auto-generated (e.g. predict next message) — skip
 		log.Printf("[filter] all Anthropic user messages auto-generated, returning empty response")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "no valid user message"})
+		writeError(w, http.StatusBadRequest, "no valid user message")
 		return
 	}
 
@@ -504,8 +535,7 @@ func (h *MessagesHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// 根据状态码分级处理
 		handleChatError(h.pool, client, err)
-		w.WriteHeader(http.StatusBadGateway)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("mimo error: %v", err))
 		return
 	}
 
@@ -743,7 +773,7 @@ func extractContentString(content interface{}) string {
 	if s, ok := content.(string); ok {
 		return s
 	}
-	// Handle array content format: [{"type":"text","text":"..."},{"type":"image_url",...}]
+	// Handle []interface{} (from generic JSON decoding)
 	if arr, ok := content.([]interface{}); ok {
 		var buf strings.Builder
 		for _, item := range arr {
@@ -754,6 +784,49 @@ func extractContentString(content interface{}) string {
 						buf.WriteString(text)
 					}
 				}
+			}
+		}
+		return buf.String()
+	}
+	// Handle []map[string]interface{} (some JSON decoders produce this)
+	if arr, ok := content.([]map[string]interface{}); ok {
+		var buf strings.Builder
+		for _, m := range arr {
+			typ, _ := m["type"].(string)
+			if typ == "text" {
+				if text, _ := m["text"].(string); text != "" {
+					buf.WriteString(text)
+				}
+			}
+		}
+		return buf.String()
+	}
+	// Handle []adapter.ContentPart (strongly typed)
+	if arr, ok := content.([]adapter.ContentPart); ok {
+		var buf strings.Builder
+		for _, part := range arr {
+			if part.Type == "text" {
+				buf.WriteString(part.Text)
+			}
+		}
+		return buf.String()
+	}
+	// Fallback: try JSON marshal/unmarshal
+	b, err := json.Marshal(content)
+	if err != nil {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(b, &s) == nil {
+		return s
+	}
+	// Try to unmarshal as array of content parts
+	var parts []adapter.ContentPart
+	if json.Unmarshal(b, &parts) == nil {
+		var buf strings.Builder
+		for _, part := range parts {
+			if part.Type == "text" {
+				buf.WriteString(part.Text)
 			}
 		}
 		return buf.String()

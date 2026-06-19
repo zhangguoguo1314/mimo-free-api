@@ -67,6 +67,24 @@ func extractTextFromContent(content interface{}) string {
 			}
 		}
 		return strings.Join(parts, "\n")
+	case []map[string]interface{}:
+		var parts []string
+		for _, b := range c {
+			blockType, _ := b["type"].(string)
+			switch blockType {
+			case "text":
+				if text, ok := b["text"].(string); ok {
+					parts = append(parts, text)
+				}
+			case "tool_result":
+				if rc, ok := b["content"]; ok {
+					parts = append(parts, extractTextFromContent(rc))
+				}
+			case "tool_use":
+				continue
+			}
+		}
+		return strings.Join(parts, "\n")
 	default:
 		// Try JSON marshal/unmarshal for unexpected types
 		b, err := json.Marshal(content)
@@ -76,6 +94,11 @@ func extractTextFromContent(content interface{}) string {
 		var s string
 		if json.Unmarshal(b, &s) == nil {
 			return s
+		}
+		// Try to unmarshal as array of content blocks
+		var arr []map[string]interface{}
+		if json.Unmarshal(b, &arr) == nil {
+			return extractTextFromContent(arr)
 		}
 		return ""
 	}

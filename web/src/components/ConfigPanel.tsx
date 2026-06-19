@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Key, Cpu, Save, Eye, EyeOff, Check, Loader2, Users, Plus, Trash2, Globe, ClipboardPaste, TestTube, Download, Upload, RefreshCw, X } from 'lucide-react'
+import { Key, Cpu, Save, Eye, EyeOff, Check, Loader2, Users, Plus, Trash2, Globe, ClipboardPaste, TestTube, Download, Upload, RefreshCw, X, Activity, ShieldAlert, Clock } from 'lucide-react'
 import { useSettings } from '../contexts/SettingsContext'
-import { apiFetch, testAccountModel, testPoolAll, exportAccounts, importAccounts, replaceCookie } from '../lib/api'
+import { apiFetch, testAccountModel, testPoolAll, exportAccounts, importAccounts, replaceCookie, fetchPoolStatus, type PoolStatus } from '../lib/api'
 
 interface Account {
   id: string
@@ -20,6 +20,13 @@ interface ModelTestResult {
   error?: string
 }
 
+function getAccountStatusColor(s: PoolStatus): string {
+  if (!s.healthy) return 'bg-red-500'
+  if (s.cooldown_remaining > 0) return 'bg-amber-400'
+  if (s.active > 0) return 'bg-blue-500'
+  return 'bg-emerald-500'
+}
+
 export function ConfigPanel() {
   const { t, resolvedTheme, lang } = useSettings()
   const isDark = resolvedTheme === 'dark'
@@ -32,6 +39,9 @@ export function ConfigPanel() {
   const [defaultModel, setDefaultModel] = useState('mimo-v2.5')
   const [accounts, setAccounts] = useState<Account[]>([])
   const [loading, setLoading] = useState(true)
+
+  // Pool status
+  const [poolStatus, setPoolStatus] = useState<PoolStatus[]>([])
 
   // Add form state
   const [showAdd, setShowAdd] = useState(false)
@@ -76,7 +86,26 @@ export function ConfigPanel() {
       .finally(() => setLoading(false))
   }
 
+  const loadPoolStatus = async () => {
+    try {
+      const data = await fetchPoolStatus()
+      setPoolStatus(data.accounts || [])
+    } catch (e) {
+      console.error('Failed to load pool status', e)
+    }
+  }
+
   useEffect(() => { loadConfig() }, [])
+  useEffect(() => {
+    loadPoolStatus()
+    const iv = setInterval(loadPoolStatus, 5000)
+    return () => clearInterval(iv)
+  }, [])
+
+  const totalAccounts = poolStatus.length
+  const healthyAccounts = poolStatus.filter(s => s.healthy && s.cooldown_remaining <= 0).length
+  const cooldownAccounts = poolStatus.filter(s => s.cooldown_remaining > 0).length
+  const unhealthyAccounts = poolStatus.filter(s => !s.healthy).length
 
   const handleSave = async () => {
     setSaving(true)
@@ -113,6 +142,7 @@ export function ConfigPanel() {
         setNewId(''); setNewToken(''); setNewUserId(''); setNewPh('')
         setShowAdd(false)
         loadConfig()
+        loadPoolStatus()
       }
     } finally {
       setAdding(false)
@@ -126,7 +156,10 @@ export function ConfigPanel() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id })
     })
-    if (res.ok) loadConfig()
+    if (res.ok) {
+      loadConfig()
+      loadPoolStatus()
+    }
   }
 
   // 处理粘贴的 JSON 配置
@@ -174,6 +207,7 @@ export function ConfigPanel() {
         setPasteJson('')
         setShowPaste(false)
         loadConfig()
+        loadPoolStatus()
         alert(lang === 'zh' ? `成功添加 ${added} 个账号` : `Added ${added} accounts`)
       } else {
         alert(lang === 'zh' ? '添加失败，请检查配置格式' : 'Failed to add, please check config format')
@@ -266,6 +300,7 @@ export function ConfigPanel() {
       setShowCookieModal(false)
       setCookieAccount(null)
       loadConfig()
+      loadPoolStatus()
     } catch (e) {
       alert(lang === 'zh' ? '保存失败: ' + (e as Error).message : 'Save failed: ' + (e as Error).message)
     } finally {
@@ -322,6 +357,7 @@ export function ConfigPanel() {
       const result = await importAccounts(accountsArray)
       setImportResult(result)
       loadConfig()
+      loadPoolStatus()
     } catch (e) {
       alert(lang === 'zh' ? '导入失败: ' + (e as Error).message : 'Import failed: ' + (e as Error).message)
     } finally {
@@ -473,6 +509,94 @@ export function ConfigPanel() {
             </motion.button>
           </div>
         </div>
+
+        {/* Pool Status Dashboard */}
+        {poolStatus.length > 0 && (
+          <div className={`p-4 rounded-xl border ${isDark ? 'bg-white/[0.02] border-white/[0.08]' : 'bg-gray-50/80 border-gray-200'}`}>
+            {/* Summary stats */}
+            <div className="grid grid-cols-4 gap-3 mb-4">
+              <div className={`p-3 rounded-lg ${isDark ? 'bg-white/[0.04]' : 'bg-white'} border ${isDark ? 'border-white/[0.06]' : 'border-gray-100'}`}>
+                <div className="flex items-center gap-2 mb-1">
+                  <Activity className={`w-3.5 h-3.5 ${isDark ? 'text-blue-400' : 'text-blue-500'}`} />
+                  <span className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{lang === 'zh' ? '总账号' : 'Total'}</span>
+                </div>
+                <p className={`text-lg font-bold ${isDark ? 'text-white' : 'text-gray-800'}`}>{totalAccounts}</p>
+              </div>
+              <div className={`p-3 rounded-lg ${isDark ? 'bg-white/[0.04]' : 'bg-white'} border ${isDark ? 'border-white/[0.06]' : 'border-gray-100'}`}>
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                  <span className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{lang === 'zh' ? '健康' : 'Healthy'}</span>
+                </div>
+                <p className={`text-lg font-bold ${isDark ? 'text-white' : 'text-gray-800'}`}>{healthyAccounts}</p>
+              </div>
+              <div className={`p-3 rounded-lg ${isDark ? 'bg-white/[0.04]' : 'bg-white'} border ${isDark ? 'border-white/[0.06]' : 'border-gray-100'}`}>
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
+                  <span className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{lang === 'zh' ? '冷却中' : 'Cooldown'}</span>
+                </div>
+                <p className={`text-lg font-bold ${isDark ? 'text-white' : 'text-gray-800'}`}>{cooldownAccounts}</p>
+              </div>
+              <div className={`p-3 rounded-lg ${isDark ? 'bg-white/[0.04]' : 'bg-white'} border ${isDark ? 'border-white/[0.06]' : 'border-gray-100'}`}>
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="w-2.5 h-2.5 rounded-full bg-red-500" />
+                  <span className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{lang === 'zh' ? '不健康' : 'Unhealthy'}</span>
+                </div>
+                <p className={`text-lg font-bold ${isDark ? 'text-white' : 'text-gray-800'}`}>{unhealthyAccounts}</p>
+              </div>
+            </div>
+
+            {/* Status grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+              {poolStatus.map((s) => {
+                const colorClass = getAccountStatusColor(s)
+                return (
+                  <motion.div
+                    key={s.id}
+                    className={`p-2.5 rounded-lg border ${isDark ? 'border-white/[0.06] bg-white/[0.02]' : 'border-gray-100 bg-white'} hover:shadow-sm transition-shadow`}
+                    whileHover={{ scale: 1.02 }}
+                  >
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <div className={`w-2.5 h-2.5 rounded-full ${colorClass}`} />
+                      <span className={`text-xs font-medium truncate ${isDark ? 'text-gray-200' : 'text-gray-700'}`}>{s.id}</span>
+                    </div>
+                    <div className="space-y-0.5">
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className={`${isDark ? 'text-gray-500' : 'text-gray-400'}`}>{lang === 'zh' ? '日用量' : 'Daily'}</span>
+                        <span className={`font-mono ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>{s.daily_used}/{s.daily_limit}</span>
+                      </div>
+                      <div className="w-full h-1 rounded-full bg-gray-200/20 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${s.daily_used >= s.daily_limit ? 'bg-red-500' : s.daily_used > s.daily_limit * 0.8 ? 'bg-amber-400' : 'bg-emerald-500'}`}
+                          style={{ width: `${Math.min(100, (s.daily_used / Math.max(1, s.daily_limit)) * 100)}%` }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className={`${isDark ? 'text-gray-500' : 'text-gray-400'}`}>{lang === 'zh' ? '并发' : 'Concurrent'}</span>
+                        <span className={`font-mono ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>{s.active}/2</span>
+                      </div>
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className={`${isDark ? 'text-gray-500' : 'text-gray-400'}`}>{lang === 'zh' ? '速率' : 'Rate'}</span>
+                        <span className={`font-mono ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>{s.rate_used}/{s.rate_limit}</span>
+                      </div>
+                      {s.cooldown_remaining > 0 && (
+                        <div className="flex items-center gap-1 text-[10px] text-amber-400">
+                          <Clock className="w-3 h-3" />
+                          <span>{Math.ceil(s.cooldown_remaining / 1e9)}s</span>
+                        </div>
+                      )}
+                      {s.fail429_count > 0 && (
+                        <div className="flex items-center gap-1 text-[10px] text-red-400">
+                          <ShieldAlert className="w-3 h-3" />
+                          <span>429: {s.fail429_count}</span>
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Import result */}
         <AnimatePresence>

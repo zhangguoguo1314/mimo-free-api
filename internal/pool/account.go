@@ -38,7 +38,7 @@ type weightedEntry struct {
 
 type Pool struct {
 	clients  []*entry
-	counter  atomic.Uint64
+	counter  uint64
 	mu       sync.RWMutex
 	cfg      PoolConfig
 }
@@ -48,12 +48,20 @@ type entry struct {
 	client        *mimo.WebClient
 	healthy       bool
 	active        int32         // 当前正在处理的请求数（原子操作）
-	cooldownAt    atomic.Int64  // 冷却截止时间（unix nano，0 表示无冷却）
+	cooldownAt    int64         // 冷却截止时间（unix nano，0 表示无冷却）
 	dailyCount    int32         // 当天已使用次数（原子操作）
-	dailyResetAt  atomic.Int64  // 日用量重置时间（unix nano，UTC+8 0 点）
+	dailyResetAt  int64         // 日用量重置时间（unix nano，UTC+8 0 点）
 	fail429Count  int32         // 连续 429 错误计数（原子操作）
 	tsMu          sync.Mutex    // 保护 timestamps 的互斥锁
 	timestamps    []int64       // 滑动窗口时间戳，用于速率限制
+}
+
+// imax returns the maximum of two ints.
+func imax(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func New(accounts []config.Account) *Pool {
@@ -89,7 +97,7 @@ func NewWithConfig(accounts []config.Account, cfg PoolConfig) *Pool {
 			healthy:      true,
 			timestamps:   make([]int64, 0, cfg.RateLimit),
 		}
-		e.dailyResetAt.Store(resetAt)
+		atomic.StoreInt64(&e.dailyResetAt, resetAt)
 		p.clients = append(p.clients, e)
 	}
 	return p
@@ -111,7 +119,7 @@ func (p *Pool) Acquire() (*mimo.WebClient, func(), error) {
 		if !e.healthy {
 			continue
 		}
-		cd := e.cooldownAt.Load()
+		cd := atomic.LoadInt64(&e.cooldownAt)
 		if cd > 0 && now.UnixNano() < cd {
 			continue
 		}
@@ -130,9 +138,9 @@ func (p *Pool) Acquire() (*mimo.WebClient, func(), error) {
 			continue
 		}
 		// 计算权重
-		w := max(1, int(int32(p.cfg.MaxConcurrent)-a)) *
-			max(1, int(int32(p.cfg.RateLimit)-int32(p.rateUsed(e, now)))) *
-			max(1, int(int32(p.cfg.DailyLimit)-dc))
+		w := imax(1, int(int32(p.cfg.MaxConcurrent)-a)) *
+			imax(1, int(int32(p.cfg.RateLimit)-int32(p.rateUsed(e, now)))) *
+			imax(1, int(int32(p.cfg.DailyLimit)-dc))
 		candidates = append(candidates, weightedEntry{e: e, weight: w})
 	}
 
@@ -141,7 +149,7 @@ func (p *Pool) Acquire() (*mimo.WebClient, func(), error) {
 		// 日用量重置检查
 		p.resetDailyIfNeeded(e, now)
 		atomic.AddInt32(&e.dailyCount, 1)
-		e.active++ // 原子递增
+		atomic.AddInt32(&e.active, 1)
 		e.addTimestamp(now)
 		// 请求抖动：0 ~ JitterMax 随机延迟
 		if p.cfg.JitterMax > 0 {
@@ -167,7 +175,7 @@ func (p *Pool) Acquire() (*mimo.WebClient, func(), error) {
 	if best != nil {
 		p.resetDailyIfNeeded(best, now)
 		atomic.AddInt32(&best.dailyCount, 1)
-		best.active++
+		atomic.AddInt32(&best.active, 1)
 		best.addTimestamp(now)
 		if p.cfg.JitterMax > 0 {
 			jitter := time.Duration(rand.Int63n(int64(p.cfg.JitterMax)))
@@ -180,7 +188,7 @@ func (p *Pool) Acquire() (*mimo.WebClient, func(), error) {
 	e := p.clients[0]
 	p.resetDailyIfNeeded(e, now)
 	atomic.AddInt32(&e.dailyCount, 1)
-	e.active++
+	atomic.AddInt32(&e.active, 1)
 	e.addTimestamp(now)
 	if p.cfg.JitterMax > 0 {
 		jitter := time.Duration(rand.Int63n(int64(p.cfg.JitterMax)))
@@ -202,7 +210,7 @@ func (p *Pool) isAvailable(e *entry, now time.Time) bool {
 	}
 
 	// 冷却检查
-	cd := e.cooldownAt.Load()
+	cd := atomic.LoadInt64(&e.cooldownAt)
 	if cd > 0 && now.UnixNano() < cd {
 		return false
 	}
@@ -265,10 +273,10 @@ func (p *Pool) rateUsed(e *entry, now time.Time) int {
 
 // resetDailyIfNeeded 检查是否需要重置日用量（基于 UTC+8 的日期变化）
 func (p *Pool) resetDailyIfNeeded(e *entry, now time.Time) {
-	resetAt := e.dailyResetAt.Load()
+	resetAt := atomic.LoadInt64(&e.dailyResetAt)
 	if now.UnixNano() >= resetAt {
 		newResetAt := nextDailyReset()
-		e.dailyResetAt.Store(newResetAt)
+		atomic.StoreInt64(&e.dailyResetAt, newResetAt)
 		atomic.StoreInt32(&e.dailyCount, 0)
 	}
 }
@@ -324,7 +332,7 @@ func (p *Pool) MarkCooldown(client *mimo.WebClient) {
 	defer p.mu.RUnlock()
 	for _, e := range p.clients {
 		if e.client == client {
-			e.cooldownAt.Store(time.Now().Add(p.cfg.CooldownTime).UnixNano())
+			atomic.StoreInt64(&e.cooldownAt, time.Now().Add(p.cfg.CooldownTime).UnixNano())
 			return
 		}
 	}
@@ -351,10 +359,10 @@ func (p *Pool) MarkRateLimit(client *mimo.WebClient) {
 			count := atomic.AddInt32(&e.fail429Count, 1)
 			if count >= 3 {
 				e.healthy = false
-				e.cooldownAt.Store(time.Now().Add(p.cfg.CooldownTime).UnixNano())
+				atomic.StoreInt64(&e.cooldownAt, time.Now().Add(p.cfg.CooldownTime).UnixNano())
 			} else {
 				// 未达到阈值，仅冷却
-				e.cooldownAt.Store(time.Now().Add(p.cfg.CooldownTime).UnixNano())
+				atomic.StoreInt64(&e.cooldownAt, time.Now().Add(p.cfg.CooldownTime).UnixNano())
 			}
 			return
 		}
@@ -379,7 +387,7 @@ func (p *Pool) MarkTempError(client *mimo.WebClient) {
 	defer p.mu.RUnlock()
 	for _, e := range p.clients {
 		if e.client == client {
-			e.cooldownAt.Store(time.Now().Add(30 * time.Second).UnixNano())
+			atomic.StoreInt64(&e.cooldownAt, time.Now().Add(30 * time.Second).UnixNano())
 			return
 		}
 	}
@@ -398,7 +406,7 @@ func (p *Pool) Status() []AccountStatus {
 	now := time.Now()
 	statuses := make([]AccountStatus, 0, len(p.clients))
 	for _, e := range p.clients {
-		cd := e.cooldownAt.Load()
+		cd := atomic.LoadInt64(&e.cooldownAt)
 		cooldownRemaining := time.Duration(0)
 		if cd > 0 && now.UnixNano() < cd {
 			cooldownRemaining = time.Duration(cd - now.UnixNano())
@@ -481,7 +489,7 @@ func (p *Pool) Reload(accounts []config.Account) {
 					healthy:    true,
 					timestamps: make([]int64, 0, p.cfg.RateLimit),
 				}
-				e.dailyResetAt.Store(resetAt)
+				atomic.StoreInt64(&e.dailyResetAt, resetAt)
 				newClients = append(newClients, e)
 			}
 		} else {
@@ -492,7 +500,7 @@ func (p *Pool) Reload(accounts []config.Account) {
 				healthy:    true,
 				timestamps: make([]int64, 0, p.cfg.RateLimit),
 			}
-			e.dailyResetAt.Store(resetAt)
+			atomic.StoreInt64(&e.dailyResetAt, resetAt)
 			newClients = append(newClients, e)
 		}
 	}
@@ -551,7 +559,7 @@ func (p *Pool) HealthCheck(ctx context.Context) map[string]bool {
 			e.healthy = healthy
 			// 如果健康检查通过，清除冷却状态并重置 429 计数
 			if healthy {
-				e.cooldownAt.Store(0)
+				atomic.StoreInt64(&e.cooldownAt, 0)
 				atomic.StoreInt32(&e.fail429Count, 0)
 			}
 		}

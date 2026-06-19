@@ -21,7 +21,7 @@ import (
 	"github.com/zhangguoguo1314/mimo-free-api/internal/stats"
 )
 
-//go:embed static/*
+//go:embed all:static/*
 var staticFiles embed.FS
 
 func main() {

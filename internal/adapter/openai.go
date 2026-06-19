@@ -14,6 +14,7 @@ type OpenAIChatRequest struct {
 	Messages    []OpenAIMessage `json:"messages"`
 	Stream      bool            `json:"stream"`
 	Temperature *float64        `json:"temperature,omitempty"`
+	TopP        *float64        `json:"top_p,omitempty"`
 	MaxTokens   *int            `json:"max_tokens,omitempty"`
 	Tools       []OpenAITool    `json:"tools,omitempty"`
 	ToolChoice  interface{}     `json:"tool_choice,omitempty"`
@@ -32,10 +33,20 @@ type OpenAIToolFunction struct {
 	Parameters  interface{} `json:"parameters,omitempty"`
 }
 
-// OpenAIMessage 是 OpenAI 格式的消息
+// ContentPart 是 OpenAI 多模态内容块
+type ContentPart struct {
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	ImageURL *struct {
+		URL    string `json:"url"`
+		Detail string `json:"detail,omitempty"`
+	} `json:"image_url,omitempty"`
+}
+
 // OpenAIMessage 是 OpenAI 格式的消息
 type OpenAIMessage struct {
 	Role       string           `json:"role"`
+	Name       string           `json:"name,omitempty"`
 	Content    interface{}      `json:"content"` // string 或 []ContentPart
 	ToolCalls  []OpenAIToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string           `json:"tool_call_id,omitempty"`
