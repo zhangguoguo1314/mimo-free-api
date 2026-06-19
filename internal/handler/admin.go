@@ -407,7 +407,7 @@ func (h *AdminHandler) ExportAccounts(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	data, err := json.MarshalIndent(export, "", "  ")
+	data, err := json.MarshalIndent(map[string]interface{}{"accounts": export}, "", "  ")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to marshal")
 		return
@@ -420,10 +420,25 @@ func (h *AdminHandler) ExportAccounts(w http.ResponseWriter, r *http.Request) {
 
 // ImportAccounts 导入账号
 func (h *AdminHandler) ImportAccounts(w http.ResponseWriter, r *http.Request) {
+	// 支持两种格式: 直接数组 [...] 和包裹对象 {"accounts": [...]}
 	var accounts []config.Account
-	if err := json.NewDecoder(r.Body).Decode(&accounts); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid body, expected array of accounts")
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to read body")
 		return
+	}
+
+	// 先尝试直接作为数组解析
+	if err := json.Unmarshal(bodyBytes, &accounts); err != nil {
+		// 再尝试作为包裹对象解析
+		var wrapper struct {
+			Accounts []config.Account `json:"accounts"`
+		}
+		if err2 := json.Unmarshal(bodyBytes, &wrapper); err2 != nil || wrapper.Accounts == nil {
+			writeError(w, http.StatusBadRequest, "invalid body, expected array of accounts or {accounts: [...]}")
+			return
+		}
+		accounts = wrapper.Accounts
 	}
 
 	var added, skipped int

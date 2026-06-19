@@ -72,7 +72,7 @@ export function ConfigPanel() {
   // Import/Export state
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [importing, setImporting] = useState(false)
-  const [importResult, setImportResult] = useState<{imported: number; skipped: number; failed: number} | null>(null)
+  const [importResult, setImportResult] = useState<{added: number; skipped: number; errors?: {id: string; reason: string}[]} | null>(null)
 
   const loadConfig = () => {
     apiFetch('/admin/api/config')
@@ -613,8 +613,8 @@ export function ConfigPanel() {
                 <Check className="w-4 h-4 shrink-0" />
                 <span>
                   {lang === 'zh'
-                    ? `导入完成: 成功 ${importResult.imported}，跳过 ${importResult.skipped}，失败 ${importResult.failed}`
-                    : `Import done: ${importResult.imported} imported, ${importResult.skipped} skipped, ${importResult.failed} failed`
+                    ? `导入完成: 成功 ${importResult.added}，跳过 ${importResult.skipped}${importResult.errors ? `，失败 ${importResult.errors.length}` : ''}`
+                    : `Import done: ${importResult.added} added, ${importResult.skipped} skipped${importResult.errors ? `, ${importResult.errors.length} failed` : ''}`
                   }
                 </span>
                 <button onClick={() => setImportResult(null)} className="ml-auto opacity-60 hover:opacity-100">

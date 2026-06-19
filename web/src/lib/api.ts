@@ -76,7 +76,7 @@ export async function exportAccounts(): Promise<Blob> {
 }
 
 // 导入账号池
-export async function importAccounts(accounts: any[]): Promise<{imported: number; skipped: number; failed: number}> {
+export async function importAccounts(accounts: any[]): Promise<{added: number; skipped: number; errors?: {id: string; reason: string}[]}> {
   const res = await apiFetch('/admin/api/accounts/import', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
