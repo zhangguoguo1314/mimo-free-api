@@ -3,6 +3,7 @@ package pool
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,6 +17,8 @@ type PoolConfig struct {
 	MaxConcurrent int           // 单账号最大并发数（默认 2）
 	CooldownTime time.Duration // 请求失败后冷却时间（默认 60s）
 	RateLimit    int           // 单账号每分钟最大请求数（默认 20）
+	DailyLimit   int           // 单账号每天最大请求数（默认 150）
+	JitterMax    time.Duration // Acquire 成功后随机抖动延迟上限（默认 800ms）
 }
 
 // DefaultPoolConfig 默认保护配置
@@ -23,6 +26,14 @@ var DefaultPoolConfig = PoolConfig{
 	MaxConcurrent: 2,
 	CooldownTime:  60 * time.Second,
 	RateLimit:     20,
+	DailyLimit:    150,
+	JitterMax:     800 * time.Millisecond,
+}
+
+// weightedEntry 加权选择用的候选条目
+type weightedEntry struct {
+	e      *entry
+	weight int
 }
 
 type Pool struct {
@@ -33,13 +44,16 @@ type Pool struct {
 }
 
 type entry struct {
-	account    config.Account
-	client     *mimo.WebClient
-	healthy    bool
-	active     int32         // 当前正在处理的请求数（原子操作）
-	cooldownAt atomic.Int64 // 冷却截止时间（unix nano，0 表示无冷却）
-	tsMu       sync.Mutex    // 保护 timestamps 的互斥锁
-	timestamps []int64       // 滑动窗口时间戳，用于速率限制
+	account       config.Account
+	client        *mimo.WebClient
+	healthy       bool
+	active        int32         // 当前正在处理的请求数（原子操作）
+	cooldownAt    atomic.Int64  // 冷却截止时间（unix nano，0 表示无冷却）
+	dailyCount    int32         // 当天已使用次数（原子操作）
+	dailyResetAt  atomic.Int64  // 日用量重置时间（unix nano，UTC+8 0 点）
+	fail429Count  int32         // 连续 429 错误计数（原子操作）
+	tsMu          sync.Mutex    // 保护 timestamps 的互斥锁
+	timestamps    []int64       // 滑动窗口时间戳，用于速率限制
 }
 
 func New(accounts []config.Account) *Pool {
@@ -56,18 +70,27 @@ func NewWithConfig(accounts []config.Account, cfg PoolConfig) *Pool {
 	if cfg.RateLimit <= 0 {
 		cfg.RateLimit = DefaultPoolConfig.RateLimit
 	}
+	if cfg.DailyLimit <= 0 {
+		cfg.DailyLimit = DefaultPoolConfig.DailyLimit
+	}
+	if cfg.JitterMax <= 0 {
+		cfg.JitterMax = DefaultPoolConfig.JitterMax
+	}
 
 	p := &Pool{cfg: cfg}
+	resetAt := nextDailyReset()
 	for _, acc := range accounts {
 		if !acc.Active {
 			continue
 		}
-		p.clients = append(p.clients, &entry{
-			account:    acc,
-			client:     mimo.NewWebClient(acc.ServiceToken, acc.UserID, acc.Ph),
-			healthy:    true,
-			timestamps: make([]int64, 0, cfg.RateLimit),
-		})
+		e := &entry{
+			account:      acc,
+			client:       mimo.NewWebClient(acc.ServiceToken, acc.UserID, acc.Ph),
+			healthy:      true,
+			timestamps:   make([]int64, 0, cfg.RateLimit),
+		}
+		e.dailyResetAt.Store(resetAt)
+		p.clients = append(p.clients, e)
 	}
 	return p
 }
@@ -81,17 +104,51 @@ func (p *Pool) Acquire() (*mimo.WebClient, func(), error) {
 	}
 
 	now := time.Now()
-	n := len(p.clients)
 
-	// 第一轮：找健康、未冷却、未超并发、未超速率的账号
-	for i := 0; i < n; i++ {
-		idx := int(p.counter.Add(1)) % n
-		e := p.clients[idx]
-		if p.isAvailable(e, now) {
-			e.active++ // 原子递增
-			e.addTimestamp(now)
-			return e.client, func() { p.release(e) }, nil
+	// 第一轮：加权随机选择（healthy 且未冷却的账号才有权重）
+	var candidates []weightedEntry
+	for _, e := range p.clients {
+		if !e.healthy {
+			continue
 		}
+		cd := e.cooldownAt.Load()
+		if cd > 0 && now.UnixNano() < cd {
+			continue
+		}
+		a := atomic.LoadInt32(&e.active)
+		dc := atomic.LoadInt32(&e.dailyCount)
+		// 检查日用量是否超限
+		if dc >= int32(p.cfg.DailyLimit) {
+			continue
+		}
+		// 检查并发是否超限
+		if a >= int32(p.cfg.MaxConcurrent) {
+			continue
+		}
+		// 检查速率是否超限
+		if !p.checkRateLimit(e, now) {
+			continue
+		}
+		// 计算权重
+		w := max(1, int(int32(p.cfg.MaxConcurrent)-a)) *
+			max(1, int(int32(p.cfg.RateLimit)-int32(p.rateUsed(e, now)))) *
+			max(1, int(int32(p.cfg.DailyLimit)-dc))
+		candidates = append(candidates, weightedEntry{e: e, weight: w})
+	}
+
+	if len(candidates) > 0 {
+		e := weightedRandomSelect(candidates)
+		// 日用量重置检查
+		p.resetDailyIfNeeded(e, now)
+		atomic.AddInt32(&e.dailyCount, 1)
+		e.active++ // 原子递增
+		e.addTimestamp(now)
+		// 请求抖动：0 ~ JitterMax 随机延迟
+		if p.cfg.JitterMax > 0 {
+			jitter := time.Duration(rand.Int63n(int64(p.cfg.JitterMax)))
+			time.Sleep(jitter)
+		}
+		return e.client, func() { p.release(e) }, nil
 	}
 
 	// 第二轮：如果所有账号都繁忙，找并发最低的（允许超限分配）
@@ -108,15 +165,27 @@ func (p *Pool) Acquire() (*mimo.WebClient, func(), error) {
 		}
 	}
 	if best != nil {
+		p.resetDailyIfNeeded(best, now)
+		atomic.AddInt32(&best.dailyCount, 1)
 		best.active++
 		best.addTimestamp(now)
+		if p.cfg.JitterMax > 0 {
+			jitter := time.Duration(rand.Int63n(int64(p.cfg.JitterMax)))
+			time.Sleep(jitter)
+		}
 		return best.client, func() { p.release(best) }, nil
 	}
 
 	// 兜底：使用第一个账号
 	e := p.clients[0]
+	p.resetDailyIfNeeded(e, now)
+	atomic.AddInt32(&e.dailyCount, 1)
 	e.active++
 	e.addTimestamp(now)
+	if p.cfg.JitterMax > 0 {
+		jitter := time.Duration(rand.Int63n(int64(p.cfg.JitterMax)))
+		time.Sleep(jitter)
+	}
 	return e.client, func() { p.release(e) }, nil
 }
 
@@ -143,11 +212,26 @@ func (p *Pool) isAvailable(e *entry, now time.Time) bool {
 		return false
 	}
 
+	// 日用量检查
+	p.resetDailyIfNeeded(e, now)
+	if atomic.LoadInt32(&e.dailyCount) >= int32(p.cfg.DailyLimit) {
+		return false
+	}
+
 	// 速率检查（滑动窗口：最近 60 秒内的请求数）
+	if !p.checkRateLimit(e, now) {
+		return false
+	}
+
+	return true
+}
+
+// checkRateLimit 检查速率限制（不持有 tsMu 锁的简化版本，用于加权选择预判）
+func (p *Pool) checkRateLimit(e *entry, now time.Time) bool {
 	e.tsMu.Lock()
+	defer e.tsMu.Unlock()
 	if len(e.timestamps) >= p.cfg.RateLimit {
 		cutoff := now.Add(-60 * time.Second).UnixNano()
-		// 清理过期时间戳
 		j := 0
 		for _, ts := range e.timestamps {
 			if ts >= cutoff {
@@ -157,13 +241,65 @@ func (p *Pool) isAvailable(e *entry, now time.Time) bool {
 		}
 		e.timestamps = e.timestamps[:j]
 		if len(e.timestamps) >= p.cfg.RateLimit {
-			e.tsMu.Unlock()
 			return false
 		}
 	}
-	e.tsMu.Unlock()
-
 	return true
+}
+
+// rateUsed 返回当前滑动窗口内的请求数（调用者需确保线程安全或仅在估算场景使用）
+func (p *Pool) rateUsed(e *entry, now time.Time) int {
+	e.tsMu.Lock()
+	defer e.tsMu.Unlock()
+	cutoff := now.Add(-60 * time.Second).UnixNano()
+	j := 0
+	for _, ts := range e.timestamps {
+		if ts >= cutoff {
+			e.timestamps[j] = ts
+			j++
+		}
+	}
+	e.timestamps = e.timestamps[:j]
+	return len(e.timestamps)
+}
+
+// resetDailyIfNeeded 检查是否需要重置日用量（基于 UTC+8 的日期变化）
+func (p *Pool) resetDailyIfNeeded(e *entry, now time.Time) {
+	resetAt := e.dailyResetAt.Load()
+	if now.UnixNano() >= resetAt {
+		newResetAt := nextDailyReset()
+		e.dailyResetAt.Store(newResetAt)
+		atomic.StoreInt32(&e.dailyCount, 0)
+	}
+}
+
+// nextDailyReset 计算下一个 UTC+8 0 点的 unix nano 时间戳
+func nextDailyReset() int64 {
+	// 获取当前 UTC+8 时间
+	loc := time.FixedZone("CST", 8*3600)
+	now := time.Now().In(loc)
+	// 下一个 0 点
+	next := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, loc)
+	return next.UnixNano()
+}
+
+// weightedRandomSelect 根据权重随机选择一个 entry
+func weightedRandomSelect(candidates []weightedEntry) *entry {
+	totalWeight := 0
+	for _, c := range candidates {
+		totalWeight += c.weight
+	}
+	if totalWeight <= 0 {
+		return candidates[0].e
+	}
+	r := rand.Intn(totalWeight)
+	for _, c := range candidates {
+		r -= c.weight
+		if r < 0 {
+			return c.e
+		}
+	}
+	return candidates[len(candidates)-1].e
 }
 
 // addTimestamp 记录请求时间戳
@@ -206,6 +342,49 @@ func (p *Pool) MarkUnhealthy(client *mimo.WebClient) {
 	}
 }
 
+// MarkRateLimit 429 专用：递增 fail429Count，超过 3 次标记不健康并冷却
+func (p *Pool) MarkRateLimit(client *mimo.WebClient) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	for _, e := range p.clients {
+		if e.client == client {
+			count := atomic.AddInt32(&e.fail429Count, 1)
+			if count >= 3 {
+				e.healthy = false
+				e.cooldownAt.Store(time.Now().Add(p.cfg.CooldownTime).UnixNano())
+			} else {
+				// 未达到阈值，仅冷却
+				e.cooldownAt.Store(time.Now().Add(p.cfg.CooldownTime).UnixNano())
+			}
+			return
+		}
+	}
+}
+
+// MarkAuthFailed 401 专用：标记不健康（Cookie 失效不自动恢复）
+func (p *Pool) MarkAuthFailed(client *mimo.WebClient) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	for _, e := range p.clients {
+		if e.client == client {
+			e.healthy = false
+			return
+		}
+	}
+}
+
+// MarkTempError 502/503 专用：仅冷却 30 秒，不标记不健康
+func (p *Pool) MarkTempError(client *mimo.WebClient) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	for _, e := range p.clients {
+		if e.client == client {
+			e.cooldownAt.Store(time.Now().Add(30 * time.Second).UnixNano())
+			return
+		}
+	}
+}
+
 // Next 获取下一个可用客户端（向后兼容，不追踪占用）
 func (p *Pool) Next() (*mimo.WebClient, error) {
 	client, _, err := p.Acquire()
@@ -232,6 +411,9 @@ func (p *Pool) Status() []AccountStatus {
 			RateUsed:         len(e.timestamps),
 			RateLimit:        p.cfg.RateLimit,
 			MaxConcurrent:    p.cfg.MaxConcurrent,
+			DailyUsed:        int(atomic.LoadInt32(&e.dailyCount)),
+			DailyLimit:       p.cfg.DailyLimit,
+			Fail429Count:     atomic.LoadInt32(&e.fail429Count),
 			Source:           e.account.Source,
 			AddedAt:          formatTimestamp(e.account.AddedAt),
 		})
@@ -248,6 +430,9 @@ type AccountStatus struct {
 	RateUsed          int
 	RateLimit         int
 	MaxConcurrent     int
+	DailyUsed         int
+	DailyLimit        int
+	Fail429Count      int32
 	Source            string
 	AddedAt           string
 }
@@ -278,6 +463,7 @@ func (p *Pool) Reload(accounts []config.Account) {
 
 	// 计算新增、删除、变更
 	var newClients []*entry
+	resetAt := nextDailyReset()
 	for id, acc := range newMap {
 		if old, exists := oldMap[id]; exists {
 			// 已存在：检查是否有变更（比较关键字段）
@@ -289,21 +475,25 @@ func (p *Pool) Reload(accounts []config.Account) {
 				newClients = append(newClients, old)
 			} else {
 				// 有变更：创建新 entry
-				newClients = append(newClients, &entry{
+				e := &entry{
 					account:    acc,
 					client:     mimo.NewWebClient(acc.ServiceToken, acc.UserID, acc.Ph),
 					healthy:    true,
 					timestamps: make([]int64, 0, p.cfg.RateLimit),
-				})
+				}
+				e.dailyResetAt.Store(resetAt)
+				newClients = append(newClients, e)
 			}
 		} else {
 			// 新增账号
-			newClients = append(newClients, &entry{
+			e := &entry{
 				account:    acc,
 				client:     mimo.NewWebClient(acc.ServiceToken, acc.UserID, acc.Ph),
 				healthy:    true,
 				timestamps: make([]int64, 0, p.cfg.RateLimit),
-			})
+			}
+			e.dailyResetAt.Store(resetAt)
+			newClients = append(newClients, e)
 		}
 	}
 	// 已删除的账号不在 newMap 中，自动被丢弃
@@ -359,9 +549,10 @@ func (p *Pool) HealthCheck(ctx context.Context) map[string]bool {
 	for _, e := range p.clients {
 		if healthy, ok := results[e.account.ID]; ok {
 			e.healthy = healthy
-			// 如果健康检查通过，清除冷却状态
+			// 如果健康检查通过，清除冷却状态并重置 429 计数
 			if healthy {
 				e.cooldownAt.Store(0)
+				atomic.StoreInt32(&e.fail429Count, 0)
 			}
 		}
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -123,10 +124,8 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 
 	body, err := client.Chat(ctx, query, model, convID, parentID, false)
 	if err != nil {
-		log.Printf("[error] web chat: %v", err)
-		// 请求失败，自动标记冷却和不健康
-		h.pool.MarkCooldown(client)
-		h.pool.MarkUnhealthy(client)
+		// 根据状态码分级处理
+		handleChatError(h.pool, client, err)
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("mimo error: %v", err))
 		return
 	}
@@ -381,6 +380,53 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	})
 }
 
+// mimoStatusRe 用于从错误信息 "mimo returned 401: ..." 中提取 HTTP 状态码
+var mimoStatusRe = regexp.MustCompile(`mimo returned (\d+)`)
+
+// extractMimoStatusCode 从错误信息中解析 mimo 返回的 HTTP 状态码。
+// 错误格式为 fmt.Errorf("mimo returned %d: %s", statusCode, body)。
+// 如果无法解析，返回 0。
+func extractMimoStatusCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	m := mimoStatusRe.FindStringSubmatch(err.Error())
+	if len(m) >= 2 {
+		var code int
+		for _, ch := range m[1] {
+			if ch >= '0' && ch <= '9' {
+				code = code*10 + int(ch-'0')
+			}
+		}
+		return code
+	}
+	return 0
+}
+
+// handleChatError 根据错误中的 HTTP 状态码进行分级处理。
+// - 401/403: 认证失败，标记 Cookie 失效
+// - 429: 限流，退避计数
+// - 502/503: 临时故障，短冷却
+// - 其他/无法解析状态码: 保持原有冷却+不健康标记
+func handleChatError(p *pool.Pool, client *mimo.WebClient, err error) {
+	statusCode := extractMimoStatusCode(err)
+	switch statusCode {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		log.Printf("[error] web chat status=%d: %v", statusCode, err)
+		p.MarkAuthFailed(client)
+	case http.StatusTooManyRequests:
+		log.Printf("[error] web chat status=%d: %v", statusCode, err)
+		p.MarkRateLimit(client)
+	case http.StatusBadGateway, http.StatusServiceUnavailable:
+		log.Printf("[error] web chat status=%d: %v", statusCode, err)
+		p.MarkTempError(client)
+	default:
+		log.Printf("[error] web chat status=%d: %v", statusCode, err)
+		p.MarkCooldown(client)
+		p.MarkUnhealthy(client)
+	}
+}
+
 func ModelsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -456,9 +502,8 @@ func (h *MessagesHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	body, err := client.Chat(ctx, query, routeResult.Model, convID, parentID, false)
 	if err != nil {
-		// 请求失败，自动标记冷却和不健康
-		h.pool.MarkCooldown(client)
-		h.pool.MarkUnhealthy(client)
+		// 根据状态码分级处理
+		handleChatError(h.pool, client, err)
 		w.WriteHeader(http.StatusBadGateway)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return

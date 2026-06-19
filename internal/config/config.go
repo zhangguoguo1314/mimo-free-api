@@ -7,12 +7,22 @@ import (
 )
 
 type Config struct {
-	Port          string    `json:"port"`
-	APIKey        string    `json:"api_key"` // 网关自身的认证 Key
-	DefaultModel  string    `json:"default_model"`
-	Accounts      []Account `json:"accounts"`
-	AdminPassword string    `json:"admin_password"`
-	PasswordSet   bool      `json:"password_set"`
+	Port          string      `json:"port"`
+	APIKey        string      `json:"api_key"` // 网关自身的认证 Key
+	DefaultModel  string      `json:"default_model"`
+	Accounts      []Account   `json:"accounts"`
+	AdminPassword string      `json:"admin_password"`
+	PasswordSet   bool        `json:"password_set"`
+	Pool          PoolConfig  `json:"pool,omitempty"`
+}
+
+// PoolConfig 账号池配置
+type PoolConfig struct {
+	MaxConcurrent int    `json:"max_concurrent,omitempty"`
+	CooldownTime  int    `json:"cooldown_time,omitempty"`   // 秒
+	RateLimit     int    `json:"rate_limit,omitempty"`      // 每分钟
+	DailyLimit    int    `json:"daily_limit,omitempty"`     // 每天
+	JitterMax     int    `json:"jitter_max,omitempty"`      // 毫秒
 }
 
 // Account 网页端账号配置

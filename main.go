@@ -40,7 +40,27 @@ func main() {
 	stats.InitConvStore("data/conversations.json")
 
 	// 初始化账号池
-	accountPool := pool.New(cfg.Accounts)
+	poolCfg := pool.PoolConfig{
+		MaxConcurrent: pool.DefaultPoolConfig.MaxConcurrent,
+		CooldownTime:  pool.DefaultPoolConfig.CooldownTime,
+		RateLimit:     pool.DefaultPoolConfig.RateLimit,
+	}
+	if cfg.Pool.MaxConcurrent > 0 {
+		poolCfg.MaxConcurrent = cfg.Pool.MaxConcurrent
+	}
+	if cfg.Pool.CooldownTime > 0 {
+		poolCfg.CooldownTime = time.Duration(cfg.Pool.CooldownTime) * time.Second
+	}
+	if cfg.Pool.RateLimit > 0 {
+		poolCfg.RateLimit = cfg.Pool.RateLimit
+	}
+	if cfg.Pool.DailyLimit > 0 {
+		poolCfg.DailyLimit = cfg.Pool.DailyLimit
+	}
+	if cfg.Pool.JitterMax > 0 {
+		poolCfg.JitterMax = time.Duration(cfg.Pool.JitterMax) * time.Millisecond
+	}
+	accountPool := pool.NewWithConfig(cfg.Accounts, poolCfg)
 
 	// 启动后台定时健康检查（每 10 分钟）
 	go func() {
