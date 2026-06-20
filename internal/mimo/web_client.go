@@ -164,6 +164,10 @@ func ParseWebSSE(ctx context.Context, reader io.ReadCloser, events chan<- WebSSE
 			event.Data = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		}
 	}
+	// 发送最后一个事件（如果没有空行结尾）
+	if event.Event != "" || event.Data != "" {
+		events <- event
+	}
 	return scanner.Err()
 }
 
