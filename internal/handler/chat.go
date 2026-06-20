@@ -185,6 +185,8 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 
 		// 使用 extractTextFromSSE 提取内容（与 testModelChat 相同）
 		content := extractTextFromSSE(string(respBody))
+		// 过滤 thinking 内容（<think...>...</think...>）
+		content = filterThinkingContent(content)
 		log.Printf("[sse] attempt=%d textLen=%d content=%q", attempt, len(content), truncate(content, 100))
 
 		var textContent strings.Builder
@@ -410,6 +412,18 @@ func filterThinkingChunk(content string, inThinking bool) (string, bool) {
 	}
 
 	return result.String(), inThinking
+}
+
+// filterThinkingContent 从完整文本中移除 <think...>...</think...> 标签及其内容
+func filterThinkingContent(content string) string {
+	// 移除 \u0000 字符
+	content = strings.ReplaceAll(content, "\u0000", "")
+
+	// 使用正则表达式移除 <think...>...</think...> 块
+	re := regexp.MustCompile(`(?s)<think\b[^>]*>.*?</think\s*>`)
+	content = re.ReplaceAllString(content, "")
+
+	return strings.TrimSpace(content)
 }
 
 func (h *ChatHandler) nonStreamWebToOpenAI(w http.ResponseWriter, model string, events <-chan mimo.WebSSEEvent, hasTools bool) {
