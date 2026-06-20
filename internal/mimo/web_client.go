@@ -148,7 +148,7 @@ func ParseWebSSE(ctx context.Context, reader io.ReadCloser, events chan<- WebSSE
 		default:
 		}
 
-		line := scanner.Text()
+		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			if event.Event != "" || event.Data != "" {
 				events <- event
