@@ -48,17 +48,12 @@ func NewWebClient(serviceToken, userID, ph string) *WebClient {
 }
 
 // WebChatRequest 是网页端请求格式
+// 注意：只包含官网实际发送的字段，多余的字段可能导致空回复
 type WebChatRequest struct {
 	MsgID          string       `json:"msgId"`
 	ConversationID string       `json:"conversationId"`
 	Query          string       `json:"query"`
-	Messages       []interface{} `json:"messages"`
-	ParentID       string       `json:"parentId"`
-	Save           bool         `json:"save"`
 	IsEditedQuery  bool         `json:"isEditedQuery"`
-	Source         string       `json:"source"`
-	Scene          string       `json:"scene"`
-	IsLocal        bool         `json:"isLocal"`
 	ModelConfig    ModelConfig  `json:"modelConfig"`
 	MultiMedias    []interface{} `json:"multiMedias"`
 }
@@ -79,27 +74,16 @@ func (c *WebClient) Chat(ctx context.Context, query, model, conversationID, pare
 	if conversationID == "" {
 		conversationID = uuid.New().String()
 	}
-	if parentID == "" {
-		parentID = "0"
-	}
 
 	reqBody := WebChatRequest{
 		MsgID:          uuid.New().String(),
 		ConversationID: conversationID,
 		Query:          query,
-		Messages:       []interface{}{},
-		ParentID:       parentID,
-		Save:           true,
 		IsEditedQuery:  false,
-		Source:         "STATION",
-		Scene:          "STATION",
-		IsLocal:        false,
 		ModelConfig: ModelConfig{
 			EnableThinking:  thinking,
 			WebSearchStatus: "disabled",
 			Model:           model,
-			Temperature:     0.8,
-			TopP:            0.95,
 		},
 		MultiMedias: []interface{}{},
 	}
@@ -238,19 +222,11 @@ func (c *WebClient) Validate(ctx context.Context) error {
 		"msgId":          uuid.New().String(),
 		"conversationId": uuid.New().String(),
 		"query":          "hi",
-		"messages":       []interface{}{},
-		"parentId":       "0",
-		"save":           false,
 		"isEditedQuery":  false,
-		"source":         "STATION",
-		"scene":          "STATION",
-		"isLocal":        false,
 		"modelConfig": map[string]interface{}{
 			"enableThinking":  false,
 			"webSearchStatus": "disabled",
 			"model":           "mimo-v2.5",
-			"temperature":     0.8,
-			"topP":            0.95,
 		},
 		"multiMedias": []interface{}{},
 	}
