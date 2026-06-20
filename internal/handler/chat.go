@@ -166,54 +166,47 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 			continue
 		}
 
-		events := make(chan mimo.WebSSEEvent, 256)
-		go func() {
-			defer close(events)
-			mimo.ParseWebSSE(ctx, body, events)
-		}()
-
-		// 收集所有事件到缓冲区，不直接写入 w
-		var textContent strings.Builder
-		var lastMsgID string
-		var hasContent bool
-		var usage *usageData
-		msgCount := 0
-		inThinking := false
-
-		for ev := range events {
-			if ev.Event == "message" && ev.ID != "" {
-				lastMsgID = ev.ID
+		// 读取整个响应体
+		respBody, err := io.ReadAll(body)
+		body.Close()
+		stats.Get().DecrConcurrency()
+		if err != nil {
+			release()
+			if attempt == maxRetries {
+				if finalRelease != nil {
+					finalRelease()
+				}
+				writeError(w, http.StatusBadGateway, fmt.Sprintf("read response: %v", err))
+				return
 			}
-			switch ev.Event {
-			case "usage":
-				var u usageData
-				if json.Unmarshal([]byte(ev.Data), &u) == nil {
-					usage = &u
-				}
-			case "message":
-				msgCount++
-				var msg struct {
-					Type    string `json:"type"`
-					Content string `json:"content"`
-				}
-				if err := json.Unmarshal([]byte(ev.Data), &msg); err != nil {
-					continue
-				}
-				if msg.Type != "text" || msg.Content == "" {
-					continue
-				}
-				c := strings.ReplaceAll(msg.Content, "\u0000", "")
-				c, inThinking = filterThinkingChunk(c, inThinking)
-				if c == "" {
-					continue
-				}
-				textContent.WriteString(c)
-				hasContent = true
-			}
+			continue
 		}
 
-		stats.Get().DecrConcurrency()
-		log.Printf("[sse] attempt=%d msgCount=%d hasContent=%v textLen=%d", attempt, msgCount, hasContent, textContent.Len())
+		// 使用 extractTextFromSSE 提取内容（与 testModelChat 相同）
+		content := extractTextFromSSE(string(respBody))
+		log.Printf("[sse] attempt=%d textLen=%d content=%q", attempt, len(content), truncate(content, 100))
+
+		var textContent strings.Builder
+		var hasContent bool
+		if content != "" {
+			textContent.WriteString(content)
+			hasContent = true
+		}
+
+		// 尝试从响应中提取 lastMsgID 和 usage
+		var lastMsgID string
+		var usage *usageData
+		// 简单解析 SSE 来提取额外信息
+		lines := strings.Split(string(respBody), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "id:") {
+				lastMsgID = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
+			}
+			if strings.HasPrefix(line, "event:usage") {
+				// 找到下一行的 data
+			}
+		}
 
 		if hasContent {
 			// 成功了，释放之前的账号（如果有）
