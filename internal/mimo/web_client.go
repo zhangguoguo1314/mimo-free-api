@@ -140,6 +140,7 @@ func ParseWebSSE(ctx context.Context, reader io.ReadCloser, events chan<- WebSSE
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 
 	var event WebSSEEvent
+	eventCount := 0
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
@@ -151,6 +152,7 @@ func ParseWebSSE(ctx context.Context, reader io.ReadCloser, events chan<- WebSSE
 		if line == "" {
 			if event.Event != "" || event.Data != "" {
 				events <- event
+				eventCount++
 				event = WebSSEEvent{}
 			}
 			continue
@@ -167,7 +169,9 @@ func ParseWebSSE(ctx context.Context, reader io.ReadCloser, events chan<- WebSSE
 	// 发送最后一个事件（如果没有空行结尾）
 	if event.Event != "" || event.Data != "" {
 		events <- event
+		eventCount++
 	}
+	log.Printf("[ParseWebSSE] parsed %d events", eventCount)
 	return scanner.Err()
 }
 
