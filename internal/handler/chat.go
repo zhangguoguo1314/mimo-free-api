@@ -423,7 +423,11 @@ func filterThinkingContent(content string) string {
 	re := regexp.MustCompile(`(?s)<think\b[^>]*>.*?</think\s*>`)
 	content = re.ReplaceAllString(content, "")
 
-	return strings.TrimSpace(content)
+	// 移除 [DONE] 标记
+	content = strings.TrimSuffix(content, "[DONE]")
+	content = strings.TrimSpace(content)
+
+	return content
 }
 
 func (h *ChatHandler) nonStreamWebToOpenAI(w http.ResponseWriter, model string, events <-chan mimo.WebSSEEvent, hasTools bool) {

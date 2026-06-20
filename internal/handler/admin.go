@@ -780,7 +780,9 @@ func extractTextFromSSE(sseBody string) string {
 			}
 			// MiMo 格式: event:message -> data.content
 			if text, ok := evt["content"].(string); ok {
-				content.WriteString(text)
+				if text != "[DONE]" {
+					content.WriteString(text)
+				}
 			}
 			// 也尝试从嵌套 data 中提取
 			if evtData, ok := evt["data"].(map[string]interface{}); ok {
