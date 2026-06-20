@@ -198,6 +198,7 @@ func (h *AdminHandler) TestAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 // testAccountValidity 测试账号是否有效（通过发送一条简短chat消息验证）
+// 使用与官方网页端完全一致的精简请求格式，避免多余字段导致空回复
 func testAccountValidity(acc *config.Account) bool {
 	// 清理字段
 	acc.Ph = cleanToken(acc.Ph)
@@ -210,23 +211,16 @@ func testAccountValidity(acc *config.Account) bool {
 	encodedPh := url.QueryEscape(acc.Ph)
 	reqURL := fmt.Sprintf("%s/open-apis/bot/chat?xiaomichatbot_ph=%s", webBaseURL, encodedPh)
 
+	// 精简请求格式：只包含官网实际发送的字段
 	reqBody := map[string]interface{}{
 		"msgId":          uuid.New().String(),
 		"conversationId": uuid.New().String(),
 		"query":          "hi",
-		"messages":       []interface{}{},
-		"parentId":       "0",
-		"save":           false,
 		"isEditedQuery":  false,
-		"source":         "STATION",
-		"scene":          "STATION",
-		"isLocal":        false,
 		"modelConfig": map[string]interface{}{
 			"enableThinking":  false,
 			"webSearchStatus": "disabled",
 			"model":           "mimo-v2.5",
-			"temperature":     0.8,
-			"topP":            0.95,
 		},
 		"multiMedias": []interface{}{},
 	}
@@ -691,6 +685,8 @@ func (h *AdminHandler) PasswordStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // testModelChat 使用指定账号和模型发送测试消息
+// testModelChat 测试指定账号在指定模型下的响应
+// 使用与官方网页端完全一致的精简请求格式，避免多余字段导致空回复
 func testModelChat(ctx context.Context, acc *config.Account, model string) (string, int, error) {
 	const webBaseURL = "https://aistudio.xiaomimimo.com"
 	const chatAPI = "/open-apis/bot/chat"
@@ -698,23 +694,16 @@ func testModelChat(ctx context.Context, acc *config.Account, model string) (stri
 	encodedPh := url.QueryEscape(acc.Ph)
 	reqURL := fmt.Sprintf("%s%s?xiaomichatbot_ph=%s", webBaseURL, chatAPI, encodedPh)
 
+	// 精简请求格式：只包含官网实际发送的字段
 	reqBody := map[string]interface{}{
 		"msgId":          uuid.New().String(),
 		"conversationId": uuid.New().String(),
 		"query":          "hi",
-		"messages":       []interface{}{},
-		"parentId":       "0",
-		"save":           false,
 		"isEditedQuery":  false,
-		"source":         "STATION",
-		"scene":          "STATION",
-		"isLocal":        false,
 		"modelConfig": map[string]interface{}{
 			"enableThinking":  false,
 			"webSearchStatus": "disabled",
 			"model":           model,
-			"temperature":     0.8,
-			"topP":            0.95,
 		},
 		"multiMedias": []interface{}{},
 	}
