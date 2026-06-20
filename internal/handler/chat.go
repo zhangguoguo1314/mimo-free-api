@@ -526,14 +526,15 @@ func (h *ChatHandler) writeStreamResponse(w http.ResponseWriter, model string, t
 		}
 	}
 
-	// 简单分块发送（每50个字符一个chunk）
+	// 按 rune 分块发送（避免截断多字节 UTF-8 字符）
 	chunkSize := 50
-	for i := 0; i < len(text); i += chunkSize {
+	runes := []rune(text)
+	for i := 0; i < len(runes); i += chunkSize {
 		end := i + chunkSize
-		if end > len(text) {
-			end = len(text)
+		if end > len(runes) {
+			end = len(runes)
 		}
-		chunk := adapter.MakeOpenAIStreamChunk(model, text[i:end], false)
+		chunk := adapter.MakeOpenAIStreamChunk(model, string(runes[i:end]), false)
 		fmt.Fprintf(w, "data: %s\n\n", chunk)
 		flusher.Flush()
 	}
