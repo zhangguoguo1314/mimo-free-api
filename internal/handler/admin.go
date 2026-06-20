@@ -744,7 +744,10 @@ func testModelChat(ctx context.Context, acc *config.Account, model string) (stri
 	// 读取SSE响应（使用LimitReader避免内存问题，设置ctx超时控制总时间）
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024)) // 最多读取1MB
 
-	content := extractTextFromSSE(string(respBody))
+	content, errMsg := extractTextFromSSE(string(respBody))
+	if content == "" && errMsg != "" {
+		content = errMsg
+	}
 	if content == "" {
 		content = truncate(string(respBody), 500)
 	}
@@ -753,8 +756,11 @@ func testModelChat(ctx context.Context, acc *config.Account, model string) (stri
 }
 
 // extractTextFromSSE 从 SSE 响应中提取文本内容
-func extractTextFromSSE(sseBody string) string {
+// extractTextFromSSE 从 MiMo SSE 响应中提取文本内容
+// 返回 (内容, 错误信息)
+func extractTextFromSSE(sseBody string) (string, string) {
 	var content strings.Builder
+	var errMsg string
 	lines := strings.Split(sseBody, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -778,7 +784,7 @@ func extractTextFromSSE(sseBody string) string {
 					}
 				}
 			}
-			// MiMo 格式: 只提取 type=="text" 的事件的 content，避免提取 dialogId 等其他事件
+			// MiMo 格式: 提取 type=="text" 的内容
 			if evtType, ok := evt["type"].(string); ok && evtType == "text" {
 				if text, ok := evt["content"].(string); ok {
 					if text != "[DONE]" {
@@ -786,9 +792,15 @@ func extractTextFromSSE(sseBody string) string {
 					}
 				}
 			}
+			// MiMo 错误格式: 提取 type=="error" 的内容作为错误信息
+			if evtType, ok := evt["type"].(string); ok && evtType == "error" {
+				if text, ok := evt["content"].(string); ok && text != "" {
+					errMsg = text
+				}
+			}
 		}
 	}
-	return content.String()
+	return content.String(), errMsg
 }
 
 // truncate 截取字符串到指定长度

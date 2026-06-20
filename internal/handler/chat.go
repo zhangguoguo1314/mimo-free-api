@@ -184,16 +184,19 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 		}
 
 		// 使用 extractTextFromSSE 提取内容（与 testModelChat 相同）
-		content := extractTextFromSSE(string(respBody))
+		content, errMsg := extractTextFromSSE(string(respBody))
 		// 过滤 thinking 内容（<think...>...</think...>）
 		content = filterThinkingContent(content)
-		log.Printf("[sse] attempt=%d textLen=%d content=%q", attempt, len(content), truncate(content, 100))
+		log.Printf("[sse] attempt=%d textLen=%d content=%q errMsg=%q", attempt, len(content), truncate(content, 100), errMsg)
 
 		var textContent strings.Builder
 		var hasContent bool
 		if content != "" {
 			textContent.WriteString(content)
 			hasContent = true
+		} else if errMsg != "" {
+			// MiMo 返回了错误信息（如"没有权限操作"），标记为失败以便重试
+			log.Printf("[sse] attempt=%d got error from MiMo: %s", attempt, errMsg)
 		}
 
 		// 尝试从响应中提取 lastMsgID 和 usage
