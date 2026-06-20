@@ -255,9 +255,22 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 		h.pool.MarkCooldown(client)
 	}
 
-	// 所有重试都失败了，返回空回复
+	// 所有重试都失败了
 	log.Printf("[retry] all retries exhausted, returning empty response")
-	writeError(w, http.StatusBadGateway, "all accounts returned empty response, please try again later")
+	if stream {
+		// 流式模式下 header 可能已经发送，无法返回错误
+		// 发送一个空的结束 chunk
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			flusher = &noopFlusher{}
+		}
+		finishChunk := adapter.MakeOpenAIStreamChunk(model, "", true)
+		fmt.Fprintf(w, "data: %s\n\n", finishChunk)
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	} else {
+		writeError(w, http.StatusBadGateway, "all accounts returned empty response, please try again later")
+	}
 }
 
 func (h *ChatHandler) streamWebToOpenAI(w http.ResponseWriter, model string, events <-chan mimo.WebSSEEvent, hasTools bool) {
