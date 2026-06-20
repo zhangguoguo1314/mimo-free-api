@@ -263,6 +263,7 @@ func (h *ChatHandler) streamWebToOpenAI(w http.ResponseWriter, model string, eve
 	}
 
 	msgIdx := 0
+	var lastErrorMsg string
 	for event := range events {
 		if event.Event != "message" {
 			continue
@@ -276,7 +277,14 @@ func (h *ChatHandler) streamWebToOpenAI(w http.ResponseWriter, model string, eve
 			continue
 		}
 		log.Printf("[stream] message[%d] type=%q content_len=%d content=%q", msgIdx, msg.Type, len(msg.Content), msg.Content)
-		if msg.Type != "text" || msg.Content == "" {
+		if msg.Type != "text" {
+			if msg.Type == "error" {
+				lastErrorMsg = msg.Content
+			}
+			msgIdx++
+			continue
+		}
+		if msg.Content == "" {
 			msgIdx++
 			continue
 		}
@@ -294,6 +302,9 @@ func (h *ChatHandler) streamWebToOpenAI(w http.ResponseWriter, model string, eve
 
 	finalText := strings.TrimSpace(buffered.String())
 	log.Printf("[stream] finalText len=%d content=%q", len(finalText), finalText)
+	if finalText == "" && lastErrorMsg != "" {
+		log.Printf("[stream] empty text but got error message: %s", lastErrorMsg)
+	}
 	if hasTools && len(finalText) > 0 {
 		log.Printf("[tools] raw output (len=%d): %q", len(finalText), finalText[:min(len(finalText), 500)])
 		if toolcall.HasToolCallSyntax(finalText) {
@@ -362,6 +373,7 @@ func (h *ChatHandler) nonStreamWebToOpenAI(w http.ResponseWriter, model string, 
 	inThinking := false
 
 	msgIdx := 0
+	var lastErrorMsg string
 	for event := range events {
 		if event.Event != "message" {
 			continue
@@ -375,7 +387,14 @@ func (h *ChatHandler) nonStreamWebToOpenAI(w http.ResponseWriter, model string, 
 			continue
 		}
 		log.Printf("[nonstream] message[%d] type=%q content_len=%d content=%q", msgIdx, msg.Type, len(msg.Content), msg.Content)
-		if msg.Type == "text" && msg.Content != "" {
+		if msg.Type != "text" {
+			if msg.Type == "error" {
+				lastErrorMsg = msg.Content
+			}
+			msgIdx++
+			continue
+		}
+		if msg.Content != "" {
 			c := strings.ReplaceAll(msg.Content, "\u0000", "")
 			c, inThinking = filterThinkingChunk(c, inThinking)
 			content.WriteString(c)
@@ -385,6 +404,9 @@ func (h *ChatHandler) nonStreamWebToOpenAI(w http.ResponseWriter, model string, 
 
 	finalText := strings.TrimSpace(content.String())
 	log.Printf("[nonstream] finalText len=%d content=%q", len(finalText), finalText)
+	if finalText == "" && lastErrorMsg != "" {
+		log.Printf("[nonstream] empty text but got error message: %s", lastErrorMsg)
+	}
 
 	// 检测是否包含工具调用
 	if hasTools && len(finalText) > 0 {
