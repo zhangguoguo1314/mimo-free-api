@@ -1,6 +1,7 @@
 package mimo
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -135,25 +136,25 @@ type WebSSEEvent struct {
 // ParseWebSSE 解析网页端 SSE 流
 func ParseWebSSE(ctx context.Context, reader io.ReadCloser, events chan<- WebSSEEvent) error {
 	defer reader.Close()
-
-	// 读取整个响应体
-	body, err := io.ReadAll(reader)
-	if err != nil {
-		return fmt.Errorf("read body: %w", err)
-	}
-
-	// 按行分割（支持 \n, \r\n, \r）
-	lines := strings.Split(string(body), "\n")
+	// 使用 bufio.Reader 逐行读取，支持 \n 和 \r\n
+	br := bufio.NewReader(reader)
 
 	var event WebSSEEvent
 	eventCount := 0
-	for _, line := range lines {
+	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
 
+		line, err := br.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
 		line = strings.TrimSpace(line)
 		if line == "" {
 			if event.Event != "" || event.Data != "" {
@@ -177,7 +178,7 @@ func ParseWebSSE(ctx context.Context, reader io.ReadCloser, events chan<- WebSSE
 		events <- event
 		eventCount++
 	}
-	log.Printf("[ParseWebSSE] parsed %d events from %d bytes", eventCount, len(body))
+	log.Printf("[ParseWebSSE] parsed %d events", eventCount)
 	return nil
 }
 
