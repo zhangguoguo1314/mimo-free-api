@@ -778,19 +778,12 @@ func extractTextFromSSE(sseBody string) string {
 					}
 				}
 			}
-			// MiMo 格式: event:message -> data.content
-			if text, ok := evt["content"].(string); ok {
-				if text != "[DONE]" {
-					content.WriteString(text)
-				}
-			}
-			// 也尝试从嵌套 data 中提取
-			if evtData, ok := evt["data"].(map[string]interface{}); ok {
-				if text, ok := evtData["text"].(string); ok {
-					content.WriteString(text)
-				}
-				if text, ok := evtData["content"].(string); ok {
-					content.WriteString(text)
+			// MiMo 格式: 只提取 type=="text" 的事件的 content，避免提取 dialogId 等其他事件
+			if evtType, ok := evt["type"].(string); ok && evtType == "text" {
+				if text, ok := evt["content"].(string); ok {
+					if text != "[DONE]" {
+						content.WriteString(text)
+					}
 				}
 			}
 		}
