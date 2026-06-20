@@ -1,7 +1,6 @@
 package mimo
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
