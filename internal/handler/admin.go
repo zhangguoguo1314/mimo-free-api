@@ -235,7 +235,7 @@ func testAccountValidity(acc *config.Account) bool {
 		return false
 	}
 
-	cookie := fmt.Sprintf("userId=%s; serviceToken=%q; xiaomichatbot_ph=%q",
+	cookie := fmt.Sprintf("userId=%s; serviceToken=%s; xiaomichatbot_ph=%s",
 		acc.UserID, acc.ServiceToken, acc.Ph)
 
 	req.Header.Set("Content-Type", "application/json")
@@ -725,9 +725,9 @@ func testModelChat(ctx context.Context, acc *config.Account, model string) (stri
 	httpReq.Header.Set("x-timezone", "Asia/Shanghai")
 	httpReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.0")
 	httpReq.Header.Set("Cookie", fmt.Sprintf(
-		"userId=%s; serviceToken=%q; xiaomichatbot_ph=%q",
-		acc.UserID, acc.ServiceToken, acc.Ph,
-	))
+			"userId=%s; serviceToken=%s; xiaomichatbot_ph=%s",
+			acc.UserID, acc.ServiceToken, acc.Ph,
+		))
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(httpReq)

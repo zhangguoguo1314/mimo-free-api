@@ -108,7 +108,7 @@ func (c *WebClient) Chat(ctx context.Context, query, model, conversationID, pare
 	httpReq.Header.Set("sec-ch-ua-mobile", "?0")
 	httpReq.Header.Set("sec-ch-ua-platform", "\"Windows\"")
 	httpReq.Header.Set("Cookie", fmt.Sprintf(
-		"userId=%s; serviceToken=%q; xiaomichatbot_ph=%q",
+		"userId=%s; serviceToken=%s; xiaomichatbot_ph=%s",
 		c.userID, c.serviceToken, c.ph,
 	))
 
@@ -210,7 +210,7 @@ func (c *WebClient) SaveConversation(ctx context.Context, conversationID, query 
 	req.Header.Set("x-timezone", "Asia/Shanghai")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36")
 	req.Header.Set("Cookie", fmt.Sprintf(
-		"userId=%s; serviceToken=%q; xiaomichatbot_ph=%q",
+		"userId=%s; serviceToken=%s; xiaomichatbot_ph=%s",
 		c.userID, c.serviceToken, c.ph,
 	))
 
@@ -261,7 +261,7 @@ func (c *WebClient) Validate(ctx context.Context) error {
 	req.Header.Set("x-timezone", "Asia/Shanghai")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36")
 	req.Header.Set("Cookie", fmt.Sprintf(
-		"userId=%s; serviceToken=%q; xiaomichatbot_ph=%q",
+		"userId=%s; serviceToken=%s; xiaomichatbot_ph=%s",
 		c.userID, c.serviceToken, c.ph,
 	))
 	resp, err := validateClient.Do(req)
