@@ -123,6 +123,13 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 	}
 
 	maxRetries := 2
+	var finalText string
+	var finalUsage *usageData
+	var finalLastMsgID string
+	var finalConvID string
+	var finalClient *mimo.WebClient
+	var finalRelease func()
+
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
 			log.Printf("[retry] attempt %d/%d after empty response", attempt, maxRetries)
@@ -132,6 +139,9 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 		client, release, err := h.pool.Acquire()
 		if err != nil {
 			if attempt == maxRetries {
+				if finalRelease != nil {
+					finalRelease()
+				}
 				writeError(w, http.StatusServiceUnavailable, err.Error())
 				return
 			}
@@ -147,6 +157,9 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 			release()
 			handleChatError(h.pool, client, err)
 			if attempt == maxRetries {
+				if finalRelease != nil {
+					finalRelease()
+				}
 				writeError(w, http.StatusBadGateway, fmt.Sprintf("mimo error: %v", err))
 				return
 			}
@@ -159,117 +172,127 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 			mimo.ParseWebSSE(ctx, body, events)
 		}()
 
-		usageChan := make(chan *usageData, 1)
-		dialogChan := make(chan string, 1)
-		lastMsgIDChan := make(chan string, 1)
-		hasContentChan := make(chan bool, 1)
-		msgChan := make(chan mimo.WebSSEEvent, 64)
+		// 收集所有事件到缓冲区，不直接写入 w
+		var textContent strings.Builder
+		var lastMsgID string
+		var hasContent bool
+		var usage *usageData
+		msgCount := 0
+		inThinking := false
 
-		go func() {
-			defer close(msgChan)
-			lastMsgID := ""
-			hasContent := false
-			msgCount := 0
-			for ev := range events {
-				if ev.Event == "message" && ev.ID != "" {
-					lastMsgID = ev.ID
-				}
-				if ev.Event == "message" && !hasContent {
-					var check struct {
-						Type    string `json:"type"`
-						Content string `json:"content"`
-					}
-					if json.Unmarshal([]byte(ev.Data), &check) == nil && check.Type == "text" && check.Content != "" {
-						hasContent = true
-					}
-				}
-				switch ev.Event {
-				case "usage":
-					var u usageData
-					if json.Unmarshal([]byte(ev.Data), &u) == nil {
-						usageChan <- &u
-					}
-				case "dialogId":
-					var d dialogIdData
-					if json.Unmarshal([]byte(ev.Data), &d) == nil {
-						dialogChan <- d.Content
-					}
-				case "message":
-					msgCount++
-					msgChan <- ev
-				default:
-					if ev.Event != "" {
-						log.Printf("[sse] unknown event type: %q data: %s", ev.Event, ev.Data)
-					}
-				}
+		for ev := range events {
+			if ev.Event == "message" && ev.ID != "" {
+				lastMsgID = ev.ID
 			}
-			log.Printf("[sse] total message events: %d, hasContent: %v, lastMsgID: %s", msgCount, hasContent, lastMsgID)
-			close(usageChan)
-			close(dialogChan)
-			lastMsgIDChan <- lastMsgID
-			close(lastMsgIDChan)
-			hasContentChan <- hasContent
-			close(hasContentChan)
-		}()
-
-		if req.Stream {
-			h.streamWebToOpenAI(w, model, msgChan, len(req.Tools) > 0)
-		} else {
-			h.nonStreamWebToOpenAI(w, model, msgChan, len(req.Tools) > 0)
+			switch ev.Event {
+			case "usage":
+				var u usageData
+				if json.Unmarshal([]byte(ev.Data), &u) == nil {
+					usage = &u
+				}
+			case "message":
+				msgCount++
+				var msg struct {
+					Type    string `json:"type"`
+					Content string `json:"content"`
+				}
+				if err := json.Unmarshal([]byte(ev.Data), &msg); err != nil {
+					continue
+				}
+				if msg.Type != "text" || msg.Content == "" {
+					continue
+				}
+				c := strings.ReplaceAll(msg.Content, "\u0000", "")
+				c, inThinking = filterThinkingChunk(c, inThinking)
+				if c == "" {
+					continue
+				}
+				textContent.WriteString(c)
+				hasContent = true
+			}
 		}
 
 		stats.Get().DecrConcurrency()
+		log.Printf("[sse] attempt=%d msgCount=%d hasContent=%v textLen=%d", attempt, msgCount, hasContent, textContent.Len())
 
-		if u := <-usageChan; u != nil {
-			cached := 0
-			reasoning := 0
-			if u.NativeUsage != nil {
-				if u.NativeUsage.PromptDetails != nil {
-					cached = u.NativeUsage.PromptDetails.CachedTokens
-				}
-				if u.NativeUsage.CompletionDetails != nil {
-					reasoning = u.NativeUsage.CompletionDetails.ReasoningTokens
-				}
-			}
-			stats.Get().Record(model, u.PromptTokens, u.CompletionTokens, cached, reasoning, u.TotalTokens)
-			log.Printf("[usage] model=%s prompt=%d completion=%d cached=%d reasoning=%d",
-				model, u.PromptTokens, u.CompletionTokens, cached, reasoning)
-		}
-
-		hasContent := <-hasContentChan
 		if hasContent {
-			if convID != "" {
-				go client.SaveConversation(context.Background(), convID, query)
+			// 成功了，释放之前的账号（如果有）
+			if finalRelease != nil {
+				finalRelease()
 			}
-			if lastMsgID := <-lastMsgIDChan; lastMsgID != "" {
-				h.convStore.SetParentID(key, lastMsgID)
-				log.Printf("[conv] updated parentId for key=%s convID=%s: %s", key[:8], convID[:8], lastMsgID[:min(len(lastMsgID), 8)])
-			}
-			release()
-			return
+			finalText = textContent.String()
+			finalUsage = usage
+			finalLastMsgID = lastMsgID
+			finalConvID = convID
+			finalClient = client
+			finalRelease = release
+			break
 		}
+
+		// 空回复，保存当前结果（可能是最后一次）
+		if finalRelease != nil {
+			finalRelease()
+		}
+		finalText = textContent.String()
+		finalUsage = usage
+		finalLastMsgID = lastMsgID
+		finalConvID = convID
+		finalClient = client
+		finalRelease = release
 
 		log.Printf("[retry] empty response from account, will retry")
-		release()
-		// 标记当前账号可能需要冷却
 		h.pool.MarkCooldown(client)
 	}
 
-	// 所有重试都失败了
-	log.Printf("[retry] all retries exhausted, returning empty response")
-	if stream {
-		// 流式模式下 header 可能已经发送，无法返回错误
-		// 发送一个空的结束 chunk
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			flusher = &noopFlusher{}
+	// 写入最终响应
+	if finalText != "" {
+		// 有内容，写入成功响应
+		if stream {
+			h.writeStreamResponse(w, model, finalText, len(req.Tools) > 0)
+		} else {
+			h.writeNonStreamResponse(w, model, finalText, len(req.Tools) > 0)
 		}
-		finishChunk := adapter.MakeOpenAIStreamChunk(model, "", true)
-		fmt.Fprintf(w, "data: %s\n\n", finishChunk)
-		fmt.Fprintf(w, "data: [DONE]\n\n")
-		flusher.Flush()
+		if finalUsage != nil {
+			cached := 0
+			reasoning := 0
+			if finalUsage.NativeUsage != nil {
+				if finalUsage.NativeUsage.PromptDetails != nil {
+					cached = finalUsage.NativeUsage.PromptDetails.CachedTokens
+				}
+				if finalUsage.NativeUsage.CompletionDetails != nil {
+					reasoning = finalUsage.NativeUsage.CompletionDetails.ReasoningTokens
+				}
+			}
+			stats.Get().Record(model, finalUsage.PromptTokens, finalUsage.CompletionTokens, cached, reasoning, finalUsage.TotalTokens)
+		}
+		if finalConvID != "" {
+			go finalClient.SaveConversation(context.Background(), finalConvID, query)
+		}
+		if finalLastMsgID != "" {
+			h.convStore.SetParentID(key, finalLastMsgID)
+		}
+		finalRelease()
 	} else {
-		writeError(w, http.StatusBadGateway, "all accounts returned empty response, please try again later")
+		// 所有重试都失败，返回空或错误
+		if finalRelease != nil {
+			finalRelease()
+		}
+		if stream {
+			flusher, ok := w.(http.Flusher)
+			if !ok {
+				flusher = &noopFlusher{}
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+			w.WriteHeader(http.StatusOK)
+			finishChunk := adapter.MakeOpenAIStreamChunk(model, "", true)
+			fmt.Fprintf(w, "data: %s\n\n", finishChunk)
+			fmt.Fprintf(w, "data: [DONE]\n\n")
+			flusher.Flush()
+		} else {
+			writeError(w, http.StatusBadGateway, "all accounts returned empty response, please try again later")
+		}
 	}
 }
 
@@ -457,6 +480,76 @@ func (h *ChatHandler) nonStreamWebToOpenAI(w http.ResponseWriter, model string, 
 	}
 
 	resp := adapter.MakeOpenAIResponse(model, finalText)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(resp)
+}
+
+// writeStreamResponse 将已收集的文本作为 SSE 流写入响应
+func (h *ChatHandler) writeStreamResponse(w http.ResponseWriter, model string, text string, hasTools bool) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		flusher = &noopFlusher{}
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+
+	// 检测是否包含工具调用
+	if hasTools && len(text) > 0 {
+		if toolcall.HasToolCallSyntax(text) {
+			calls := toolcall.ParseToolCallsFromText(text)
+			if len(calls) > 0 {
+				toolCalls := toolcall.ConvertToolCallsToOpenAI(calls)
+				finishChunk := adapter.MakeOpenAIStreamChunk(model, "", true)
+				fmt.Fprintf(w, "data: %s\n\n", finishChunk)
+				toolChunk := adapter.MakeOpenAIStreamToolCallChunk(model, toolCalls, true)
+				fmt.Fprintf(w, "data: %s\n\n", toolChunk)
+				fmt.Fprintf(w, "data: [DONE]\n\n")
+				flusher.Flush()
+				return
+			}
+		}
+	}
+
+	// 简单分块发送（每50个字符一个chunk）
+	chunkSize := 50
+	for i := 0; i < len(text); i += chunkSize {
+		end := i + chunkSize
+		if end > len(text) {
+			end = len(text)
+		}
+		chunk := adapter.MakeOpenAIStreamChunk(model, text[i:end], false)
+		fmt.Fprintf(w, "data: %s\n\n", chunk)
+		flusher.Flush()
+	}
+
+	finishChunk := adapter.MakeOpenAIStreamChunk(model, "", true)
+	fmt.Fprintf(w, "data: %s\n\n", finishChunk)
+	fmt.Fprintf(w, "data: [DONE]\n\n")
+	flusher.Flush()
+}
+
+// writeNonStreamResponse 将已收集的文本作为非流式响应写入
+func (h *ChatHandler) writeNonStreamResponse(w http.ResponseWriter, model string, text string, hasTools bool) {
+	// 检测是否包含工具调用
+	if hasTools && len(text) > 0 {
+		if toolcall.HasToolCallSyntax(text) {
+			calls := toolcall.ParseToolCallsFromText(text)
+			if len(calls) > 0 {
+				toolCalls := toolcall.ConvertToolCallsToOpenAI(calls)
+				resp := adapter.MakeOpenAIToolCallResponse(model, toolCalls)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				w.Write(resp)
+				return
+			}
+		}
+	}
+
+	resp := adapter.MakeOpenAIResponse(model, text)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(resp)
