@@ -195,8 +195,9 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 			textContent.WriteString(content)
 			hasContent = true
 		} else if errMsg != "" {
-			// MiMo 返回了错误信息（如"没有权限操作"），标记为失败以便重试
-			log.Printf("[sse] attempt=%d got error from MiMo: %s", attempt, errMsg)
+			// MiMo 返回了错误信息（如"没有权限操作"），清除对话状态并标记为失败以便重试
+			log.Printf("[sse] attempt=%d got error from MiMo: %s, resetting conversation", attempt, errMsg)
+			h.convStore.Delete(key)
 		}
 
 		// 尝试从响应中提取 lastMsgID 和 usage

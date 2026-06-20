@@ -58,6 +58,13 @@ func (s *Store) SetParentID(key, parentID string) {
 	}
 }
 
+// Delete removes a conversation state, forcing a new conversation on next request.
+func (s *Store) Delete(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.convs, key)
+}
+
 // randomHex32 generates a random 32-char hex string using crypto/rand.
 func randomHex32() string {
 	b := make([]byte, 16)
