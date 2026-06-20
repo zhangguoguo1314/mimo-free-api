@@ -165,6 +165,7 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 		defer close(msgChan)
 		lastMsgID := ""
 		hasContent := false
+		msgCount := 0
 		for ev := range events {
 			if ev.Event == "message" && ev.ID != "" {
 				lastMsgID = ev.ID
@@ -191,9 +192,16 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 					dialogChan <- d.Content
 				}
 			case "message":
+				msgCount++
 				msgChan <- ev
+			default:
+				// Log unknown events for debugging
+				if ev.Event != "" {
+					log.Printf("[sse] unknown event type: %q data: %s", ev.Event, ev.Data)
+				}
 			}
 		}
+		log.Printf("[sse] total message events: %d, hasContent: %v, lastMsgID: %s", msgCount, hasContent, lastMsgID)
 		close(usageChan)
 		close(dialogChan)
 		lastMsgIDChan <- lastMsgID
@@ -254,6 +262,7 @@ func (h *ChatHandler) streamWebToOpenAI(w http.ResponseWriter, model string, eve
 		flusher.Flush()
 	}
 
+	msgIdx := 0
 	for event := range events {
 		if event.Event != "message" {
 			continue
@@ -263,22 +272,28 @@ func (h *ChatHandler) streamWebToOpenAI(w http.ResponseWriter, model string, eve
 			Content string `json:"content"`
 		}
 		if err := json.Unmarshal([]byte(event.Data), &msg); err != nil {
+			log.Printf("[stream] failed to unmarshal message[%d]: %v, data: %s", msgIdx, err, event.Data)
 			continue
 		}
+		log.Printf("[stream] message[%d] type=%q content_len=%d content=%q", msgIdx, msg.Type, len(msg.Content), msg.Content)
 		if msg.Type != "text" || msg.Content == "" {
+			msgIdx++
 			continue
 		}
 		c := strings.ReplaceAll(msg.Content, "\u0000", "")
 		c, inThinking = filterThinkingChunk(c, inThinking)
 		if c == "" {
+			msgIdx++
 			continue
 		}
 		buffered.WriteString(c)
 		// Stream text chunks immediately
 		writeChunk(c, false)
+		msgIdx++
 	}
 
 	finalText := strings.TrimSpace(buffered.String())
+	log.Printf("[stream] finalText len=%d content=%q", len(finalText), finalText)
 	if hasTools && len(finalText) > 0 {
 		log.Printf("[tools] raw output (len=%d): %q", len(finalText), finalText[:min(len(finalText), 500)])
 		if toolcall.HasToolCallSyntax(finalText) {
@@ -346,6 +361,7 @@ func (h *ChatHandler) nonStreamWebToOpenAI(w http.ResponseWriter, model string, 
 	var content strings.Builder
 	inThinking := false
 
+	msgIdx := 0
 	for event := range events {
 		if event.Event != "message" {
 			continue
@@ -355,16 +371,20 @@ func (h *ChatHandler) nonStreamWebToOpenAI(w http.ResponseWriter, model string, 
 			Content string `json:"content"`
 		}
 		if err := json.Unmarshal([]byte(event.Data), &msg); err != nil {
+			log.Printf("[nonstream] failed to unmarshal message[%d]: %v, data: %s", msgIdx, err, event.Data)
 			continue
 		}
+		log.Printf("[nonstream] message[%d] type=%q content_len=%d content=%q", msgIdx, msg.Type, len(msg.Content), msg.Content)
 		if msg.Type == "text" && msg.Content != "" {
 			c := strings.ReplaceAll(msg.Content, "\u0000", "")
 			c, inThinking = filterThinkingChunk(c, inThinking)
 			content.WriteString(c)
 		}
+		msgIdx++
 	}
 
 	finalText := strings.TrimSpace(content.String())
+	log.Printf("[nonstream] finalText len=%d content=%q", len(finalText), finalText)
 
 	// 检测是否包含工具调用
 	if hasTools && len(finalText) > 0 {
