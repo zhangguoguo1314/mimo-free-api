@@ -166,7 +166,7 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 			continue
 		}
 
-		events := make(chan mimo.WebSSEEvent, 64)
+		events := make(chan mimo.WebSSEEvent, 256)
 		go func() {
 			defer close(events)
 			mimo.ParseWebSSE(ctx, body, events)
