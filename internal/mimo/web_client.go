@@ -63,8 +63,8 @@ type ModelConfig struct {
 	EnableThinking  bool    `json:"enableThinking"`
 	WebSearchStatus string  `json:"webSearchStatus"`
 	Model           string  `json:"model"`
-	Temperature     float64 `json:"temperature"`
-	TopP            float64 `json:"topP"`
+	Temperature     float64 `json:"temperature,omitempty"`
+	TopP            float64 `json:"topP,omitempty"`
 }
 
 // Chat 发起聊天，返回 SSE 流
