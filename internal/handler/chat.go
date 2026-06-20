@@ -83,6 +83,31 @@ type dialogIdData struct {
 	Content string `json:"content"`
 }
 
+// estimateTokens 基于文本内容估算 token 数量
+// 中文字符约 1.5 tokens，英文约 0.75 tokens
+func estimateTokens(text string) int {
+	if text == "" {
+		return 0
+	}
+	var tokens float64
+	for _, r := range text {
+		if r > 127 {
+			// 非 ASCII 字符（中文、日文等）约 1.5 tokens
+			tokens += 1.5
+		} else if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' {
+			// 英文字母约 0.3 tokens（按词估算）
+			tokens += 0.3
+		} else if r >= '0' && r <= '9' {
+			// 数字约 0.5 tokens
+			tokens += 0.5
+		} else {
+			// 标点符号等约 0.25 tokens
+			tokens += 0.25
+		}
+	}
+	return int(tokens)
+}
+
 func (h *ChatHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	var req adapter.OpenAIChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -200,9 +225,8 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 			h.convStore.Delete(key)
 		}
 
-		// 尝试从响应中提取 lastMsgID 和 usage
+		// 尝试从响应中提取 lastMsgID
 		var lastMsgID string
-		var usage *usageData
 		// 简单解析 SSE 来提取额外信息
 		lines := strings.Split(string(respBody), "\n")
 		for _, line := range lines {
@@ -210,9 +234,16 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 			if strings.HasPrefix(line, "id:") {
 				lastMsgID = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
 			}
-			if strings.HasPrefix(line, "event:usage") {
-				// 找到下一行的 data
-			}
+		}
+
+		// MiMo 不返回 usage 数据，基于文本长度估算 token 数量
+		// 中文字符约 1.5 tokens，英文约 0.75 tokens
+		promptTokens := estimateTokens(query)
+		completionTokens := estimateTokens(content)
+		usage := &usageData{
+			PromptTokens:     promptTokens,
+			CompletionTokens: completionTokens,
+			TotalTokens:      promptTokens + completionTokens,
 		}
 
 		if hasContent {
