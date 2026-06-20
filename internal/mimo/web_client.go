@@ -136,19 +136,26 @@ type WebSSEEvent struct {
 // ParseWebSSE 解析网页端 SSE 流
 func ParseWebSSE(ctx context.Context, reader io.ReadCloser, events chan<- WebSSEEvent) error {
 	defer reader.Close()
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+
+	// 读取整个响应体
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		return fmt.Errorf("read body: %w", err)
+	}
+
+	// 按行分割（支持 \n, \r\n, \r）
+	lines := strings.Split(string(body), "\n")
 
 	var event WebSSEEvent
 	eventCount := 0
-	for scanner.Scan() {
+	for _, line := range lines {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
 
-		line := strings.TrimSpace(scanner.Text())
+		line = strings.TrimSpace(line)
 		if line == "" {
 			if event.Event != "" || event.Data != "" {
 				events <- event
@@ -171,8 +178,8 @@ func ParseWebSSE(ctx context.Context, reader io.ReadCloser, events chan<- WebSSE
 		events <- event
 		eventCount++
 	}
-	log.Printf("[ParseWebSSE] parsed %d events", eventCount)
-	return scanner.Err()
+	log.Printf("[ParseWebSSE] parsed %d events from %d bytes", eventCount, len(body))
+	return nil
 }
 
 // SaveConversation 保存对话到 MiMo 官网（维持服务端上下文的关键）
