@@ -142,6 +142,16 @@ func main() {
 		})
 	})
 
+	// 临时端点：捕获浏览器 Cookie（用于获取 HTTP Only serviceToken）
+	// 必须放在前端 SPA 路由之前
+	r.Get("/capture-cookie", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "*")
+		w.Header().Set("Content-Type", "application/json")
+		cookie := r.Header.Get("Cookie")
+		w.Write([]byte(`{"cookie":"` + cookie + `"}`))
+	})
+
 	// 前端 SPA
 	staticFS, _ := fs.Sub(staticFiles, "static")
 	r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
