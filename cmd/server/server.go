@@ -92,14 +92,5 @@ func New(cfg *config.Config, pool *pool.Pool) http.Handler {
 		r.Get("/health", adminHandler.HealthCheck)
 	})
 
-	// 临时端点：捕获浏览器 Cookie（用于获取 HTTP Only serviceToken）
-	r.Get("/capture-cookie", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "*")
-		w.Header().Set("Content-Type", "application/json")
-		cookie := r.Header.Get("Cookie")
-		w.Write([]byte(`{"cookie":"` + cookie + `"}`))
-	})
-
 	return r
 }
