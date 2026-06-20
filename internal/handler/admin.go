@@ -473,9 +473,10 @@ func (h *AdminHandler) ImportAccounts(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			// 设置来源和时间戳
+			// 设置来源、时间戳和激活状态
 			acc.Source = "file"
 			acc.AddedAt = time.Now().UnixNano()
+			acc.Active = true
 			cfg.Accounts = append(cfg.Accounts, acc)
 			existingIDs[acc.ID] = true
 			added++
