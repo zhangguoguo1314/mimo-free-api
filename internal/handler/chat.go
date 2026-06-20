@@ -241,7 +241,7 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 		finalRelease = release
 
 		log.Printf("[retry] empty response from account, will retry")
-		h.pool.MarkCooldown(client)
+		// 空回复不标记 cooldown，因为可能是临时问题
 	}
 
 	// 写入最终响应
