@@ -103,8 +103,8 @@ func (c *WebClient) Chat(ctx context.Context, query, model, conversationID, pare
 	httpReq.Header.Set("Origin", webBaseURL)
 	httpReq.Header.Set("Referer", webBaseURL+"/")
 	httpReq.Header.Set("x-timezone", "Asia/Shanghai")
-	httpReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36")
-	httpReq.Header.Set("sec-ch-ua", "\"Google Chrome\";v=\"149\", \"Chromium\";v=\"149\", \"Not)A;Brand\";v=\"24\"")
+	httpReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+	httpReq.Header.Set("sec-ch-ua", "\"Not/A)Brand\";v=\"8\", \"Chromium\";v=\"126\", \"Google Chrome\";v=\"126\"")
 	httpReq.Header.Set("sec-ch-ua-mobile", "?0")
 	httpReq.Header.Set("sec-ch-ua-platform", "\"Windows\"")
 	httpReq.Header.Set("Cookie", fmt.Sprintf(

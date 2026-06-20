@@ -243,7 +243,7 @@ func testAccountValidity(acc *config.Account) bool {
 	req.Header.Set("Origin", webBaseURL)
 	req.Header.Set("Referer", webBaseURL+"/")
 	req.Header.Set("x-timezone", "Asia/Shanghai")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.0")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -723,7 +723,7 @@ func testModelChat(ctx context.Context, acc *config.Account, model string) (stri
 	httpReq.Header.Set("Origin", webBaseURL)
 	httpReq.Header.Set("Referer", webBaseURL+"/")
 	httpReq.Header.Set("x-timezone", "Asia/Shanghai")
-	httpReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.0")
+	httpReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
 	httpReq.Header.Set("Cookie", fmt.Sprintf(
 			"userId=%s; serviceToken=%s; xiaomichatbot_ph=%s",
 			acc.UserID, acc.ServiceToken, acc.Ph,
