@@ -104,146 +104,160 @@ func (h *ChatHandler) Handle(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleWebChat 使用网页端反代 — 有状态模式（复用 MiMo conversationId + parentId）
+// 支持空回复自动重试：检测到空内容时切换账号重试，最多重试2次
 func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, req *adapter.OpenAIChatRequest, model string, stream bool) {
-	client, release, err := h.pool.Acquire()
-	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, err.Error())
-		return
-	}
-	defer release()
-
 	// Extract latest user message as query (not full history)
-	// Skip auto-generated messages like "predict next message" from MiMo Code
 	query := extractLatestOpenAIUserMessage(req.Messages)
 	if query == "" {
-		// All user messages were auto-generated (e.g. predict next message) — skip
 		log.Printf("[filter] all user messages auto-generated, returning empty response")
 		writeError(w, http.StatusBadRequest, "no valid user message")
 		return
 	}
 
-	// Look up or create conversation using hash of first message as key
 	firstMsg := extractFirstOpenAIUserMessage(req.Messages)
 	key := convstore.DeriveKey(firstMsg, model)
-	convID, parentID := h.convStore.GetOrCreate(key)
 
-	// Inject tool definitions into query so MiMo knows what tools are available
 	if len(req.Tools) > 0 {
 		toolPrompt := buildToolPrompt(req.Tools)
 		query = toolPrompt + "\n\n" + query
-		log.Printf("[tools] stateful prompt with %d tools, query len=%d, key=%s, convID=%s, parentID=%s",
-			len(req.Tools), len(query), key[:8], convID[:8], parentID[:min(len(parentID), 8)])
-		log.Printf("[tools] query content: %q", query[:min(len(query), 300)])
 	}
 
-	stats.Get().IncrConcurrency()
-	defer stats.Get().DecrConcurrency()
-
-	body, err := client.Chat(ctx, query, model, convID, parentID, false)
-	if err != nil {
-		// 根据状态码分级处理
-		handleChatError(h.pool, client, err)
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("mimo error: %v", err))
-		return
-	}
-
-	// 解析所有事件
-	events := make(chan mimo.WebSSEEvent, 64)
-	go func() {
-		defer close(events)
-		mimo.ParseWebSSE(ctx, body, events)
-	}()
-
-	// 分发事件：提取 usage 和 dialogId，转发 message
-	usageChan := make(chan *usageData, 1)
-	dialogChan := make(chan string, 1)
-	lastMsgIDChan := make(chan string, 1)
-	hasContentChan := make(chan bool, 1)
-	msgChan := make(chan mimo.WebSSEEvent, 64)
-
-	go func() {
-		defer close(msgChan)
-		lastMsgID := ""
-		hasContent := false
-		msgCount := 0
-		for ev := range events {
-			if ev.Event == "message" && ev.ID != "" {
-				lastMsgID = ev.ID
-			}
-			// Track if any non-empty text content was received
-			if ev.Event == "message" && !hasContent {
-				var check struct {
-					Type    string `json:"type"`
-					Content string `json:"content"`
-				}
-				if json.Unmarshal([]byte(ev.Data), &check) == nil && check.Type == "text" && check.Content != "" {
-					hasContent = true
-				}
-			}
-			switch ev.Event {
-			case "usage":
-				var u usageData
-				if json.Unmarshal([]byte(ev.Data), &u) == nil {
-					usageChan <- &u
-				}
-			case "dialogId":
-				var d dialogIdData
-				if json.Unmarshal([]byte(ev.Data), &d) == nil {
-					dialogChan <- d.Content
-				}
-			case "message":
-				msgCount++
-				msgChan <- ev
-			default:
-				// Log unknown events for debugging
-				if ev.Event != "" {
-					log.Printf("[sse] unknown event type: %q data: %s", ev.Event, ev.Data)
-				}
-			}
+	maxRetries := 2
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			log.Printf("[retry] attempt %d/%d after empty response", attempt, maxRetries)
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
 		}
-		log.Printf("[sse] total message events: %d, hasContent: %v, lastMsgID: %s", msgCount, hasContent, lastMsgID)
-		close(usageChan)
-		close(dialogChan)
-		lastMsgIDChan <- lastMsgID
-		close(lastMsgIDChan)
-		hasContentChan <- hasContent
-		close(hasContentChan)
-	}()
 
-	if req.Stream {
-		h.streamWebToOpenAI(w, model, msgChan, len(req.Tools) > 0)
-	} else {
-		h.nonStreamWebToOpenAI(w, model, msgChan, len(req.Tools) > 0)
-	}
-
-	// 后处理：记录 usage，保存对话映射
-	if u := <-usageChan; u != nil {
-		cached := 0
-		reasoning := 0
-		if u.NativeUsage != nil {
-			if u.NativeUsage.PromptDetails != nil {
-				cached = u.NativeUsage.PromptDetails.CachedTokens
+		client, release, err := h.pool.Acquire()
+		if err != nil {
+			if attempt == maxRetries {
+				writeError(w, http.StatusServiceUnavailable, err.Error())
+				return
 			}
-			if u.NativeUsage.CompletionDetails != nil {
-				reasoning = u.NativeUsage.CompletionDetails.ReasoningTokens
-			}
+			continue
 		}
-		stats.Get().Record(model, u.PromptTokens, u.CompletionTokens, cached, reasoning, u.TotalTokens)
-		log.Printf("[usage] model=%s prompt=%d completion=%d cached=%d reasoning=%d",
-			model, u.PromptTokens, u.CompletionTokens, cached, reasoning)
+
+		convID, parentID := h.convStore.GetOrCreate(key)
+
+		stats.Get().IncrConcurrency()
+		body, err := client.Chat(ctx, query, model, convID, parentID, false)
+		if err != nil {
+			stats.Get().DecrConcurrency()
+			release()
+			handleChatError(h.pool, client, err)
+			if attempt == maxRetries {
+				writeError(w, http.StatusBadGateway, fmt.Sprintf("mimo error: %v", err))
+				return
+			}
+			continue
+		}
+
+		events := make(chan mimo.WebSSEEvent, 64)
+		go func() {
+			defer close(events)
+			mimo.ParseWebSSE(ctx, body, events)
+		}()
+
+		usageChan := make(chan *usageData, 1)
+		dialogChan := make(chan string, 1)
+		lastMsgIDChan := make(chan string, 1)
+		hasContentChan := make(chan bool, 1)
+		msgChan := make(chan mimo.WebSSEEvent, 64)
+
+		go func() {
+			defer close(msgChan)
+			lastMsgID := ""
+			hasContent := false
+			msgCount := 0
+			for ev := range events {
+				if ev.Event == "message" && ev.ID != "" {
+					lastMsgID = ev.ID
+				}
+				if ev.Event == "message" && !hasContent {
+					var check struct {
+						Type    string `json:"type"`
+						Content string `json:"content"`
+					}
+					if json.Unmarshal([]byte(ev.Data), &check) == nil && check.Type == "text" && check.Content != "" {
+						hasContent = true
+					}
+				}
+				switch ev.Event {
+				case "usage":
+					var u usageData
+					if json.Unmarshal([]byte(ev.Data), &u) == nil {
+						usageChan <- &u
+					}
+				case "dialogId":
+					var d dialogIdData
+					if json.Unmarshal([]byte(ev.Data), &d) == nil {
+						dialogChan <- d.Content
+					}
+				case "message":
+					msgCount++
+					msgChan <- ev
+				default:
+					if ev.Event != "" {
+						log.Printf("[sse] unknown event type: %q data: %s", ev.Event, ev.Data)
+					}
+				}
+			}
+			log.Printf("[sse] total message events: %d, hasContent: %v, lastMsgID: %s", msgCount, hasContent, lastMsgID)
+			close(usageChan)
+			close(dialogChan)
+			lastMsgIDChan <- lastMsgID
+			close(lastMsgIDChan)
+			hasContentChan <- hasContent
+			close(hasContentChan)
+		}()
+
+		if req.Stream {
+			h.streamWebToOpenAI(w, model, msgChan, len(req.Tools) > 0)
+		} else {
+			h.nonStreamWebToOpenAI(w, model, msgChan, len(req.Tools) > 0)
+		}
+
+		stats.Get().DecrConcurrency()
+
+		if u := <-usageChan; u != nil {
+			cached := 0
+			reasoning := 0
+			if u.NativeUsage != nil {
+				if u.NativeUsage.PromptDetails != nil {
+					cached = u.NativeUsage.PromptDetails.CachedTokens
+				}
+				if u.NativeUsage.CompletionDetails != nil {
+					reasoning = u.NativeUsage.CompletionDetails.ReasoningTokens
+				}
+			}
+			stats.Get().Record(model, u.PromptTokens, u.CompletionTokens, cached, reasoning, u.TotalTokens)
+			log.Printf("[usage] model=%s prompt=%d completion=%d cached=%d reasoning=%d",
+				model, u.PromptTokens, u.CompletionTokens, cached, reasoning)
+		}
+
+		hasContent := <-hasContentChan
+		if hasContent {
+			if convID != "" {
+				go client.SaveConversation(context.Background(), convID, query)
+			}
+			if lastMsgID := <-lastMsgIDChan; lastMsgID != "" {
+				h.convStore.SetParentID(key, lastMsgID)
+				log.Printf("[conv] updated parentId for key=%s convID=%s: %s", key[:8], convID[:8], lastMsgID[:min(len(lastMsgID), 8)])
+			}
+			release()
+			return
+		}
+
+		log.Printf("[retry] empty response from account, will retry")
+		release()
+		// 标记当前账号可能需要冷却
+		h.pool.MarkCooldown(client)
 	}
 
-	// 保存对话到 MiMo 官网 + 更新 parentId（仅在有实际内容时）
-	hasContent := <-hasContentChan
-	if convID != "" && hasContent {
-		go client.SaveConversation(context.Background(), convID, query)
-	}
-	if lastMsgID := <-lastMsgIDChan; lastMsgID != "" && hasContent {
-		h.convStore.SetParentID(key, lastMsgID)
-		log.Printf("[conv] updated parentId for key=%s convID=%s: %s", key[:8], convID[:8], lastMsgID[:min(len(lastMsgID), 8)])
-	} else if !hasContent {
-		log.Printf("[conv] empty response, keeping previous parentId for key=%s convID=%s", key[:8], convID[:8])
-	}
+	// 所有重试都失败了，返回空回复
+	log.Printf("[retry] all retries exhausted, returning empty response")
+	writeError(w, http.StatusBadGateway, "all accounts returned empty response, please try again later")
 }
 
 func (h *ChatHandler) streamWebToOpenAI(w http.ResponseWriter, model string, events <-chan mimo.WebSSEEvent, hasTools bool) {
