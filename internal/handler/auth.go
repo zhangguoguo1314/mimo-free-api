@@ -25,10 +25,15 @@ func AdminAuth(next http.Handler) http.Handler {
 			return
 		}
 
+		// 检查 X-Admin-Token header（前端使用）
+		token := r.Header.Get("X-Admin-Token")
+
 		// 检查 Authorization header
-		token := r.Header.Get("Authorization")
-		if len(token) > 7 && token[:7] == "Bearer " {
-			token = token[7:]
+		if token == "" {
+			token = r.Header.Get("Authorization")
+			if len(token) > 7 && token[:7] == "Bearer " {
+				token = token[7:]
+			}
 		}
 
 		// 检查 admin_password query parameter（兼容简单客户端）

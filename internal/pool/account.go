@@ -431,18 +431,18 @@ func (p *Pool) Status() []AccountStatus {
 
 // AccountStatus 账号状态信息
 type AccountStatus struct {
-	ID                string
-	Healthy           bool
-	ActiveRequests    int32
-	CooldownRemaining time.Duration
-	RateUsed          int
-	RateLimit         int
-	MaxConcurrent     int
-	DailyUsed         int
-	DailyLimit        int
-	Fail429Count      int32
-	Source            string
-	AddedAt           string
+	ID                string        `json:"id"`
+	Healthy           bool          `json:"healthy"`
+	ActiveRequests    int32         `json:"active"`
+	CooldownRemaining time.Duration `json:"cooldown_remaining"`
+	RateUsed          int           `json:"rate_used"`
+	RateLimit         int           `json:"rate_limit"`
+	MaxConcurrent     int           `json:"max_concurrent"`
+	DailyUsed         int           `json:"daily_used"`
+	DailyLimit        int           `json:"daily_limit"`
+	Fail429Count      int32         `json:"fail429_count"`
+	Source            string        `json:"source"`
+	AddedAt           string        `json:"added_at"`
 }
 
 func (p *Pool) HasAccounts() bool {

@@ -48,7 +48,7 @@ export interface PoolStatus {
   daily_limit: number
   fail429_count: number
   source: string
-  added_at: number
+  added_at: string
 }
 
 export async function fetchPoolStatus(): Promise<{ total: number; accounts: PoolStatus[] }> {
@@ -65,12 +65,12 @@ export async function testPoolAll(): Promise<{results: Record<string, boolean>; 
   return res.json()
 }
 
-// 导出账号池
+// 导出账号池（完整数据，包含敏感字段）
 export async function exportAccounts(): Promise<Blob> {
   const token = getAuthToken()
   const headers: Record<string, string> = {}
   if (token) headers['X-Admin-Token'] = token
-  const res = await fetch(`${getBaseUrl()}/admin/api/accounts/export`, { headers })
+  const res = await fetch(`${getBaseUrl()}/admin/api/accounts/export?full=true`, { headers })
   if (!res.ok) throw new Error('Export failed')
   return res.blob()
 }
