@@ -257,13 +257,17 @@ func (c *WebClient) UploadMedia(ctx context.Context, data []byte, fileName, medi
 		return nil, fmt.Errorf("genUploadInfo status %d: %s", genResp.StatusCode, string(errBody))
 	}
 
+	// Read full response body for debugging
+	genBody, _ := io.ReadAll(genResp.Body)
+	log.Printf("[upload] genUploadInfo response: %s", string(genBody))
+
 	var uploadInfo UploadInfoResponse
-	if err := json.NewDecoder(genResp.Body).Decode(&uploadInfo); err != nil {
-		return nil, fmt.Errorf("genUploadInfo decode: %w", err)
+	if err := json.Unmarshal(genBody, &uploadInfo); err != nil {
+		return nil, fmt.Errorf("genUploadInfo decode: %w, body: %s", err, string(genBody))
 	}
 
 	if uploadInfo.UploadURL == "" {
-		return nil, fmt.Errorf("genUploadInfo: empty uploadUrl")
+		return nil, fmt.Errorf("genUploadInfo: empty uploadUrl, full response: %s", string(genBody))
 	}
 
 	log.Printf("[upload] got upload URL for %s: objectName=%s", fileName, uploadInfo.ObjectName)
