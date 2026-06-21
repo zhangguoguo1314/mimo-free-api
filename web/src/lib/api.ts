@@ -14,7 +14,13 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
   if (token) {
     headers.set('X-Admin-Token', token)
   }
-  return fetch(`${getBaseUrl()}${path}`, { ...init, headers })
+  const res = await fetch(`${getBaseUrl()}${path}`, { ...init, headers })
+  // Auto-handle expired sessions: clear token and reload page
+  if (res.status === 401 && token) {
+    localStorage.removeItem('admin_token')
+    window.location.reload()
+  }
+  return res
 }
 
 // 模型测试
