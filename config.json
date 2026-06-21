@@ -1,0 +1,106 @@
+{
+  "port": "7860",
+  "api_key": "sk-mimo",
+  "default_model": "mimo-v2.5-pro",
+  "admin_password": "youqisi1314",
+  "password_set": true,
+  "accounts": [
+    {
+      "id": "account-1781940242335",
+      "service_token": "/vjQa88K2JeX+vuUvl6J6PsA0o0lejaqT+43ujKIL+9DV2/gVOKb3XUVB0EdxJ1Sorf9aTEVlTD9BxgFCFWTQDhMYwygA5+5DMjhL/ugSsT76vtut5A49xgmbxNTZeuYk4RqRv0nEWZCUTdD9RYWUoJrwuw7loq7u7R5kSGaKqk9yZzP6b5Uzu6qFw0HzxQomZyfFoYMWbxVUehFBte/zlazkbNOJWbY7dY6WMbdleOU64VRQ2eLu+Hr0XgtUnb0/na173S/mVySoqYTYnRNLI/ji4w6etYwA0QKyk/tSCi2hac5IkByEW8wMHLoGU1cddJn38LEa2lS8bd6ITkx0+aYwd/kmVqMzSfUvul8FX0=",
+      "user_id": "6878756112",
+      "ph": "X9CiWQPLbXNb3b4rgOWQHg==",
+      "active": true,
+      "source": "file",
+      "added_at": 1781964075671803764
+    },
+    {
+      "id": "account-1781940370265",
+      "service_token": "/vjQa88K2JeX+vuUvl6J6HLh95vB4bfgROeXPdgiBTErd5dWWV5mlrdW8sbQk41fw/I7E9LFfpU785xl4hbhba7tJS/8rQSw/T/cwkrBRmd1jbSqQdIn6EwX6+PNNxfDDCQ8Rws+lY/o7CI3+XGOqYW5LBnmh6RXjfdaY+M2NHYcMN49tnkyk8uyEEfjrDdNWS33wXaIfrZ+8RdOooref7YeRtAm67ZmNCr/V+rcyw9UKi63SsVkvOpF2c2wm8fAjzJzTv3TByew2x+D0Gza0lPIjlA783bUV/IqFIbTVkPTxAaER+oo/V4bhy6GSDUlcpA+wfH3fCWiRst1AOqUbl/LK7p6aQGdas+DZacz9H0=",
+      "user_id": "6878756416",
+      "ph": "LRqpe2XQqT2gybcnGHJPPQ==",
+      "active": true,
+      "source": "file",
+      "added_at": 1781964075671804743
+    },
+    {
+      "id": "account-1781940541608",
+      "service_token": "/vjQa88K2JeX+vuUvl6J6K3OhP7scrLF52RhlXfRwwq45BM0d8Z1BnIq22SZL6J/vP5beq9KRaHPODCSLVAX6AeUF5E4QgBF270eRGwZBiE0BVMbxbbf2J4WV6eJrFhw/ayyrne3tYjSOvomjmUit8KO36ju4R/hYEZpCNwTmoKoGzbXViaEvp7YdFNEG9/0on+KVY8kFthUIyanF5YwqtMIqS5Er+rvsbLKQxeY1G4hfRh/R9seHO5wLl7RwcCYhP1+BPSqNCNLaP+3KtMZGkA+nj7U0XEPp1bkOPUcYrVrT2qAomwBjXz+leuqliaECHBSMrl4F+rjTSA4gyBxSEBYhz2pkYmInsuGXlnIi6s=",
+      "user_id": "6878756798",
+      "ph": "kFL2QOxrcGq/A6wjARDQsA==",
+      "active": true,
+      "source": "file",
+      "added_at": 1781964075671805486
+    },
+    {
+      "id": "account-1781940651611",
+      "service_token": "/vjQa88K2JeX+vuUvl6J6OcmEVIrxTEiMf370l77UBg/CHUYhIpQs0ccSYU2O0jPx3feB+RVPJv5HPQu2sCJ7rgDNJjFJwHKAoxEUFIL5yRqljVO9/2Fd47RqzaDXzKy/SY0JRwBmeuvQi4LrynYVc832OdbbMk8RP84V/HTem7JkapuVLvpWAPLDtnwVlJaC2wfZA8rUAFhK7kcDFEMq8HbA5dZBbwjN50yogJ3mJMHGJpD2GNjsHsqxOgRQM2Wt79vhaVvhMgCJP1Fif/CdoEDaAaF2O1LFoySinhQpZ4LF+uYqJVZlTja9jkZtGIM3G8NYVCwuHGjMJzPsoghyg3OUd2KmFYV77FucR5DhT4=",
+      "user_id": "6878757033",
+      "ph": "lIU7ax6UKPOZCpAnRINFew==",
+      "active": true,
+      "source": "file",
+      "added_at": 1781964075671806195
+    },
+    {
+      "id": "account-1781940780893",
+      "service_token": "/vjQa88K2JeX+vuUvl6J6G7RbdABsQYLVwltrD24yjOKBByH809LPpPzS3TEKrBeyaN0M1XMXUjcdsObZ9GNnKr8gh/FqIjNKroYSGxcphzkvs+2Nsa7nUbVoF1Wj/dZ7J8roKuw5xK7wonxRmYM3IaYO8uYv40fSBwSCJ2D6n3oMaXZbIcrQsmKSOaaYxdK79WRVYDobBqMPVJnlASaKqsLCwreQa+Ksbw9ZowwUAy9fEyqad9pSbBhyLAOWILEeXFJi22XynOZGpxFxvgnpzuxOU361h1wJflSttlB+1o916mQadij+HMzR2esCVRD6OskzCTn9aBYCJO6zlWNjG5/YqDTEHV0ascy6zvNzao=",
+      "user_id": "6878757287",
+      "ph": "3dI/Oz7vEP2mLb5Hiu2IUA==",
+      "active": true,
+      "source": "file",
+      "added_at": 1781964075671806757
+    },
+    {
+      "id": "01guge",
+      "service_token": "/vjQa88K2JeX+vuUvl6J6PypOrtzVWJaSRdWxfQbxBlzAvgkKZpADhZWrK66bFuB48RwZ3NPVOBg0g8RNPl+I6BYR7ZVkYZf4aDAeJCa0pLzI683fYFi7ktc8fl4MZcFSlDg/krFtB1veKoRlp71dtXCrrXhhDLUX6JiIcY1tpDZxGbCq3tacev5LlySDBQYt8qPx0eGM/eUvuUi/hs+9uiYwrN8vPGa/V/ZtQYmcgw5bgJPTri0y/9RZBPyQbU6nutn+Zwm2nCoY6sQBqAjzLavbKWYlXrJSVo4jTIvS3ZFq+Qe+pofWAqv1k+WUHCGxz+xKcdI429N9k0sy1Na3n0l5wa3D/mjWH5MRjIBmCk=",
+      "user_id": "6878484259",
+      "ph": "nS5K0xaesfUrl8JNpSeo8A==",
+      "active": true,
+      "source": "file",
+      "added_at": 1781964308643523946
+    },
+    {
+      "id": "02guge",
+      "service_token": "/vjQa88K2JeX+vuUvl6J6PQIDu9mQhpWC/gjr/UBg01kkgPf7qGJ+du+eApGN9+gTFeXAEnjFFyslKBhKYut//P82XA/jC35RDG4H/KDvFCz9pszoXXxIJTDA48pg7NczXE+pL3VOiavS0bEnbXpyt1DsgSYr6zJ4qtrnjHQG9/SCUHT1DaU7T9xxDR3isWcGOqM6c4/lN1Rw+oxurfHS9BRC8XlaY4P5wKCGYHo1rj+3d3zcbk87CAS7yFf6hoRYczHb3SNdMZMZIGyRMkQpsCri49fiYQ4aTbcuOn5xJ43XEpwyOOVFp7BxoDuNhFz6gBgJoCcpvBkAYU7TdpIkMNbhHMTZYwSj083a92+dnE=",
+      "user_id": "6878485313",
+      "ph": "zDrWhv7Eb5VyFK/RcxC73A==",
+      "active": true,
+      "source": "file",
+      "added_at": 1781964308643524595
+    },
+    {
+      "id": "03guge",
+      "service_token": "/vjQa88K2JeX+vuUvl6J6JAywC8iXn6nAHQEsNDtezCThXB+hktl66VmK8q/PVJ4AoPzLZaL62IkXDdWYZmGTydZlmi3fK3zradF53o1T+LLUYq328pt3yz1ixB6tteh5T6/bD+sO2D9042L55GX40x6i4T9A8Zv1gyAYkiASh+XkdNq/lRUk25N14H+M8N1vovwbTpyJxiVjwIGtygc0tL3gvlUAYoiRnVNxh8mwyUp/aROYiwjkxOTYmHl77/OmdnJX/fUK9IAEKQ8/qxz+8EN7qjDQjwElp5aonjcWIv1Tob48yXS1j+tYdjDd8y6Oxz3cH6A/OTYeP/ShOuMRnlrqLSoxH65ljRogqMH8PI=",
+      "user_id": "8303288805",
+      "ph": "MS2vUSpFvrzVAPa86VaEYw==",
+      "active": true,
+      "source": "file",
+      "added_at": 1781964308643524942
+    },
+    {
+      "id": "04guge",
+      "service_token": "/vjQa88K2JeX+vuUvl6J6M2C4ooF19S80rTmF7vhrpcdDGWZimsYGAy4H3fACwdi49T4kUBU9ygJRng/gMbgoGw52YmmvBG3bVKwLcSIywESWsavRVagoLz8hCoyknlhSh07BRBppz8vfAgGIVfdha4DXhjOzrwdtujmWNDcZQ0+syVq86gF3X46QXTjdPTXOt15s5/ixZN7RTTmKellZgai6BQjmqLP8iO8xlXLntaErJks3KUlGscfF0zoyBlJeG+t1Z2ihFCL5twCilB6N/KBPW5JkNUQQjleVmpeu6+NHcSq39z6OmQ+jgdzECqyRYce8m4v3yQnDhSp72bgo4/W3qQR3iUKKcYUEKmsLw8=",
+      "user_id": "6878486317",
+      "ph": "IfrKkrn0fWaOdXqX2ST7cg==",
+      "active": true,
+      "source": "file",
+      "added_at": 1781964308643525293
+    },
+    {
+      "id": "05guge",
+      "service_token": "/vjQa88K2JeX+vuUvl6J6HHpyGN8I2kOu+5a3+Gmlg2G3t9c/UvHqYHHu01kfdtGuzBWaBgHlSEkRFC2duvb+P9Vh5jJWH/hJZoMfAsX7YaKJZBbfiF7x5LvaXpAcX7Pr7vBU/++5yEDoF/gnt0PK7K8LuDA21+uA3MjVM7yGwRVowWDyYml8ojxk7w4JSIeOaJ9yyDnklPnAbYiRSisC+8/5X7YwIRoMIKWcIxlQNJab68/fBMtx9CnuDUXDHydNImIl/oOFLkZ5Gld89ePVNhuajmCuhCC3vFtJKq7LD0J9upumERef15tzVBx8nHhyJGwGP68l28pdb0UbKcLYqAXZvhM34aXpjILssVKkcc=",
+      "user_id": "6878486781",
+      "ph": "tgB64txvwfh1pZ4zJ5FPhQ==",
+      "active": true,
+      "source": "file",
+      "added_at": 1781964308643531165
+    }
+  ],
+  "pool": {
+    "max_concurrent": 2,
+    "cooldown_time": 60,
+    "rate_limit": 20,
+    "daily_limit": 150,
+    "jitter_max": 800
+  }
+}
