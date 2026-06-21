@@ -286,7 +286,30 @@ func (c *WebClient) UploadMedia(ctx context.Context, data []byte, fileName, medi
 
 	log.Printf("[upload] uploaded %s (%d bytes) -> %s", fileName, len(data), uploadInfo.ResourceURL)
 
-	// Step 3: Return MultiMedia with the resource URL
+	// Step 3: Parse the file (required for images to be recognized by MiMo)
+	parseURL := fmt.Sprintf("%s/open-apis/resource/parse?fileUrl=%s&objectName=%s&model=mimo-v2.5-pro",
+		webBaseURL, url.QueryEscape(uploadInfo.ResourceURL), url.QueryEscape(uploadInfo.ObjectName))
+
+	parseReq, err := http.NewRequestWithContext(ctx, "POST", parseURL, nil)
+	if err == nil {
+		c.setCommonHeaders(parseReq)
+		parseResp, err := c.httpClient.Do(parseReq)
+		if err != nil {
+			log.Printf("[upload] parse request failed: %v", err)
+		} else {
+			defer parseResp.Body.Close()
+			if parseResp.StatusCode == http.StatusOK {
+				log.Printf("[upload] parse success for %s", fileName)
+			} else {
+				parseBody, _ := io.ReadAll(parseResp.Body)
+				log.Printf("[upload] parse status %d: %s", parseResp.StatusCode, string(parseBody[:200]))
+			}
+		}
+	} else {
+		log.Printf("[upload] create parse request failed: %v", err)
+	}
+
+	// Step 4: Return MultiMedia with the resource URL
 	return &MultiMedia{
 		MediaType: mediaType,
 		Name:      fileName,
