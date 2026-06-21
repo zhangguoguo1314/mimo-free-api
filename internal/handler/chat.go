@@ -707,6 +707,14 @@ func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model
 			continue
 		}
 
+		// Skip events that look like message IDs (short numeric content without type)
+		if parsed.Type == "" && parsed.Content != "" {
+			// This is likely a message ID (e.g., {"content":"4958117"})
+			// Track it as lastMsgID
+			lastMsgID = parsed.Content
+			continue
+		}
+
 		content := parsed.Content
 		if content == "" {
 			continue
