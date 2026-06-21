@@ -627,11 +627,6 @@ func handleChatError(p *pool.Pool, client *mimo.WebClient, err error) {
 	}
 }
 
-// noopFlusher is used when http.ResponseWriter doesn't support Flusher
-type noopFlusher struct{}
-
-func (f *noopFlusher) Flush() {}
-
 // streamWebToOpenAIWithThinking forwards MiMo SSE events to OpenAI SSE format in real-time.
 // Thinking content (wrapped in <think...> tags) is sent as reasoning_content.
 // Returns true if any content was sent.
