@@ -108,6 +108,17 @@ func estimateTokens(text string) int {
 	return int(tokens)
 }
 
+// estimateTokensFromCharLen 基于字符数快速估算 token 数量。
+// 用于无法获取原始文本、只有字符数记录的场景（如流式输出）。
+// 中文为主的场景约 1.2 tokens/char，英文约 0.25 tokens/char，取中间值。
+func estimateTokensFromCharLen(charLen int) int {
+	if charLen <= 0 {
+		return 0
+	}
+	// 保守估算：平均约 0.8 tokens per character（混合中英文场景）
+	return int(float64(charLen) * 0.8)
+}
+
 func (h *ChatHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	var req adapter.OpenAIChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -765,6 +776,8 @@ func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model
 	var hasContent bool
 	var totalContentLen int
 	var totalThinkingLen int
+	var contentBuf strings.Builder  // Accumulate raw content for accurate token estimation
+	var thinkingBuf strings.Builder // Accumulate raw thinking for accurate token estimation
 	var lastMsgID string
 	var usage adapter.OpenAIUsage
 
@@ -854,6 +867,7 @@ func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model
 				// Extract content after <think...> tag
 				after := thinkTagRe.ReplaceAllString(part, "")
 				if after != "" {
+					thinkingBuf.WriteString(after)
 					chunk := adapter.MakeOpenAIStreamThinkingChunk(model, after)
 					fmt.Fprintf(w, "data: %s\n\n", chunk)
 					flusher.Flush()
@@ -867,6 +881,7 @@ func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model
 			if strings.Contains(part, "</think") {
 				beforeThink := endThinkTagRe.ReplaceAllString(part, "")
 				if beforeThink != "" {
+					thinkingBuf.WriteString(beforeThink)
 					chunk := adapter.MakeOpenAIStreamThinkingChunk(model, beforeThink)
 					fmt.Fprintf(w, "data: %s\n\n", chunk)
 					flusher.Flush()
@@ -878,6 +893,7 @@ func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model
 			}
 
 			if inThinking {
+				thinkingBuf.WriteString(part)
 				chunk := adapter.MakeOpenAIStreamThinkingChunk(model, part)
 				fmt.Fprintf(w, "data: %s\n\n", chunk)
 				flusher.Flush()
@@ -894,6 +910,7 @@ func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model
 
 			// Check for tool calls
 			if hasTools && toolcall.HasToolCallSyntax(cleaned) {
+				contentBuf.WriteString(cleaned)
 				chunk := adapter.MakeOpenAIStreamChunk(model, cleaned, false)
 				fmt.Fprintf(w, "data: %s\n\n", chunk)
 				flusher.Flush()
@@ -902,6 +919,7 @@ func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model
 				continue
 			}
 
+			contentBuf.WriteString(cleaned)
 			chunk := adapter.MakeOpenAIStreamChunk(model, cleaned, false)
 			fmt.Fprintf(w, "data: %s\n\n", chunk)
 			flusher.Flush()
@@ -918,8 +936,11 @@ func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model
 
 	// Record stats with actual usage from MiMo, fallback to estimation
 	if usage.TotalTokens == 0 {
-		usage.PromptTokens = estimateTokens(fmt.Sprintf("%d", totalContentLen))
-		usage.CompletionTokens = estimateTokens(fmt.Sprintf("%d", totalContentLen)) + estimateTokens(fmt.Sprintf("%d", totalThinkingLen))
+		// Use accumulated raw text for accurate estimation
+		contentText := contentBuf.String()
+		thinkingText := thinkingBuf.String()
+		usage.PromptTokens = estimateTokens(contentText) + estimateTokens(thinkingText)
+		usage.CompletionTokens = estimateTokens(contentText) + estimateTokens(thinkingText)
 		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 	}
 	stats.Get().Record(model, usage.PromptTokens, usage.CompletionTokens, 0, totalThinkingLen, usage.TotalTokens)
