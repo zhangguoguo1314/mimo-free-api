@@ -243,9 +243,8 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 
 			// Send initial role chunk immediately so 9Router doesn't timeout
 			initChunk := adapter.MakeOpenAIStreamChunk(model, "", false)
-			// Set role in the initial chunk
-			initData, _ := json.Marshal(initChunk)
-			fmt.Fprintf(w, "data: %s\n\n", initData)
+			// initChunk is already JSON []byte from MakeOpenAIStreamChunk, write directly
+			fmt.Fprintf(w, "data: %s\n\n", initChunk)
 			flusher.Flush()
 
 			hasContent, lastMsgID, _ := h.streamWebToOpenAIWithThinking(w, model, eventsCh, len(req.Tools) > 0)
