@@ -1481,8 +1481,11 @@ func extractMediaFromMessages(msgs []adapter.OpenAIMessage) []pendingMedia {
 		}
 	}
 	if lastUser == nil {
+		log.Printf("[media] no user message found")
 		return nil
 	}
+
+	log.Printf("[media] last user content type: %T, value: %v", lastUser.Content, lastUser.Content)
 
 	// Extract content parts
 	content := lastUser.Content
