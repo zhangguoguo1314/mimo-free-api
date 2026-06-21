@@ -226,13 +226,17 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 
 		// Upload media files if any (must be done after acquiring client for auth)
 		if len(mediaList) > 0 && multiMedias == nil {
+			log.Printf("[media] uploading %d media files...", len(mediaList))
 			uploaded, err := uploadMediaFiles(ctx, client, mediaList)
 			if err != nil {
 				log.Printf("[media] upload failed: %v", err)
-				// Don't fail the request, just skip media
+				// Return error to client so we know upload failed
+				writeError(w, http.StatusInternalServerError, fmt.Sprintf("media upload failed: %v", err))
+				doRelease()
+				return
 			} else {
 				multiMedias = uploaded
-				log.Printf("[media] uploaded %d media files", len(uploaded))
+				log.Printf("[media] uploaded %d media files successfully", len(uploaded))
 			}
 		}
 
