@@ -205,6 +205,56 @@ func (p *Pool) release(e *entry) {
 	atomic.AddInt32(&e.active, -1)
 }
 
+// AcquireIndex 获取一个可用客户端及其在池中的索引，并标记为使用中。返回的 ReleaseFunc 必须在请求完成后调用。
+func (p *Pool) AcquireIndex() (int, *mimo.WebClient, func(), error) {
+	client, release, err := p.Acquire()
+	if err != nil {
+		return -1, nil, nil, err
+	}
+	p.mu.RLock()
+	idx := -1
+	for i, e := range p.clients {
+		if e.client == client {
+			idx = i
+			break
+		}
+	}
+	p.mu.RUnlock()
+	return idx, client, release, nil
+}
+
+// AcquireSpecific tries to acquire a specific account by index.
+// Returns error if the account is unavailable (unhealthy, disabled, or at capacity).
+func (p *Pool) AcquireSpecific(idx int) (int, *mimo.WebClient, func(), error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if idx < 0 || idx >= len(p.clients) {
+		return -1, nil, nil, fmt.Errorf("invalid account index %d", idx)
+	}
+	e := p.clients[idx]
+	now := time.Now()
+	if !e.healthy || !e.account.Active {
+		return -1, nil, nil, fmt.Errorf("account %d not available", idx)
+	}
+	cd := atomic.LoadInt64(&e.cooldownAt)
+	if cd > 0 && now.UnixNano() < cd {
+		return -1, nil, nil, fmt.Errorf("account %d in cooldown", idx)
+	}
+	a := atomic.LoadInt32(&e.active)
+	if a >= int32(p.cfg.MaxConcurrent) {
+		return -1, nil, nil, fmt.Errorf("account %d at max concurrent", idx)
+	}
+	dc := atomic.LoadInt32(&e.dailyCount)
+	if dc >= int32(p.cfg.DailyLimit) {
+		return -1, nil, nil, fmt.Errorf("account %d daily limit reached", idx)
+	}
+	p.resetDailyIfNeeded(e, now)
+	atomic.AddInt32(&e.dailyCount, 1)
+	atomic.AddInt32(&e.active, 1)
+	e.addTimestamp(now)
+	return idx, e.client, func() { p.release(e) }, nil
+}
+
 // isAvailable 检查账号是否可用
 func (p *Pool) isAvailable(e *entry, now time.Time) bool {
 	// 健康检查

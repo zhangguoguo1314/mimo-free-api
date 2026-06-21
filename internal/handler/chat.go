@@ -159,13 +159,39 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 			time.Sleep(time.Duration(attempt) * 2 * time.Second)
 		}
 
-		client, release, err := h.pool.Acquire()
+		// Session binding: try to use the bound account for this conversation
+		var client *mimo.WebClient
+		var release func()
+		var clientIdx int
+		var err error
+
+		boundIdx := h.convStore.GetAcctIdx(key)
+		if boundIdx >= 0 {
+			// Try to acquire the bound account specifically
+			clientIdx, client, release, err = h.pool.AcquireSpecific(boundIdx)
+			if err != nil {
+				// Bound account unavailable, unbind and fall through to random selection
+				log.Printf("[bind] bound account %d unavailable, unbinding", boundIdx)
+				h.convStore.UnbindAcct(key)
+			}
+		}
+
+		if client == nil {
+			clientIdx, client, release, err = h.pool.AcquireIndex()
+		}
+
 		if err != nil {
 			if attempt == maxRetries {
 				writeError(w, http.StatusServiceUnavailable, err.Error())
 				return
 			}
 			continue
+		}
+
+		// Bind this conversation to the acquired account (if not already bound)
+		if boundIdx < 0 && clientIdx >= 0 {
+			h.convStore.SetAcctIdx(key, clientIdx)
+			log.Printf("[bind] conversation %s bound to account %d", key[:8], clientIdx)
 		}
 
 		convID, parentID := h.convStore.GetOrCreate(key)
@@ -177,6 +203,8 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 			stats.Get().DecrConcurrency()
 			release()
 			handleChatError(h.pool, client, err)
+			// Unbind from failed account so next retry picks a new one
+			h.convStore.UnbindAcct(key)
 			if attempt == maxRetries {
 				writeError(w, http.StatusBadGateway, fmt.Sprintf("mimo error: %v", err))
 				return

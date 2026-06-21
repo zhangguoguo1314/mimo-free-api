@@ -12,6 +12,7 @@ import (
 
 // Store manages conversationId → parentId mappings for MiMo conversation reuse.
 // MiMo maintains server-side context when the same conversationId + parentId chain is used.
+// Also tracks account binding: each conversation is pinned to a specific account index.
 type Store struct {
 	mu    sync.RWMutex
 	convs map[string]*convState // key: hash of first user message, value: conversationId + parentId
@@ -20,6 +21,7 @@ type Store struct {
 type convState struct {
 	ConvID   string // random UUID sent to MiMo (unique, no collision with existing MiMo convs)
 	ParentID string // last AI response message ID from MiMo SSE
+	AcctIdx  int    // bound account index in pool (-1 = not bound yet)
 }
 
 func New() *Store {
@@ -45,7 +47,7 @@ func (s *Store) GetOrCreate(key string) (convID, parentID string) {
 	}
 	// New conversation: use standard UUID format (with hyphens) to match MiMo expectations
 	newConvID := uuid.New().String()
-	s.convs[key] = &convState{ConvID: newConvID, ParentID: "0"}
+	s.convs[key] = &convState{ConvID: newConvID, ParentID: "0", AcctIdx: -1}
 	return newConvID, "0"
 }
 
@@ -58,11 +60,46 @@ func (s *Store) SetParentID(key, parentID string) {
 	}
 }
 
+// GetAcctIdx returns the bound account index for a conversation (-1 if not bound).
+func (s *Store) GetAcctIdx(key string) int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if cs, ok := s.convs[key]; ok {
+		return cs.AcctIdx
+	}
+	return -1
+}
+
+// SetAcctIdx binds a conversation to a specific account index.
+func (s *Store) SetAcctIdx(key string, idx int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cs, ok := s.convs[key]; ok {
+		cs.AcctIdx = idx
+	}
+}
+
+// UnbindAcct removes the account binding for a conversation (e.g. when account fails).
+func (s *Store) UnbindAcct(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cs, ok := s.convs[key]; ok {
+		cs.AcctIdx = -1
+	}
+}
+
 // Delete removes a conversation state, forcing a new conversation on next request.
 func (s *Store) Delete(key string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.convs, key)
+}
+
+// Len returns the number of active conversations (for monitoring).
+func (s *Store) Len() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.convs)
 }
 
 // randomHex32 generates a random 32-char hex string using crypto/rand.
