@@ -157,8 +157,14 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 	// Extract images from the last user message for upload
 	var multiMedias []mimo.MultiMedia
 	mediaList := extractMediaFromMessages(req.Messages)
+
+	// Debug: return media count in header so we can verify extraction works
+	w.Header().Set("X-Media-Count", fmt.Sprintf("%d", len(mediaList)))
 	if len(mediaList) > 0 {
-		log.Printf("[media] found %d media items in request", len(mediaList))
+		for i, m := range mediaList {
+			w.Header().Set(fmt.Sprintf("X-Media-%d-Type", i), m.MediaType)
+			w.Header().Set(fmt.Sprintf("X-Media-%d-Size", i), fmt.Sprintf("%d", len(m.Data)))
+		}
 	}
 
 	firstMsg := extractFirstOpenAIUserMessage(req.Messages)
