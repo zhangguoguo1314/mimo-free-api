@@ -217,11 +217,19 @@ func multiMediasSlice(medias []MultiMedia) []interface{} {
 	return result
 }
 
-// UploadInfoResponse is the response from genUploadInfo
+// UploadInfoResponse is the response from genUploadInfo (wrapped in data field)
 type UploadInfoResponse struct {
+	Code int              `json:"code"`
+	Msg string           `json:"msg"`
+	Data UploadInfoData  `json:"data"`
+}
+
+// UploadInfoData contains the actual upload information
+type UploadInfoData struct {
 	UploadURL   string `json:"uploadUrl"`
 	ResourceURL string `json:"resourceUrl"`
 	ObjectName  string `json:"objectName"`
+	ResourceID  string `json:"resourceId"`
 }
 
 // UploadMedia uploads a media file to MiMo's storage and returns the resource URL.
@@ -266,14 +274,14 @@ func (c *WebClient) UploadMedia(ctx context.Context, data []byte, fileName, medi
 		return nil, fmt.Errorf("genUploadInfo decode: %w, body: %s", err, string(genBody))
 	}
 
-	if uploadInfo.UploadURL == "" {
+	if uploadInfo.Data.UploadURL == "" {
 		return nil, fmt.Errorf("genUploadInfo: empty uploadUrl, full response: %s", string(genBody))
 	}
 
-	log.Printf("[upload] got upload URL for %s: objectName=%s", fileName, uploadInfo.ObjectName)
+	log.Printf("[upload] got upload URL for %s: objectName=%s", fileName, uploadInfo.Data.ObjectName)
 
 	// Step 2: PUT upload the file
-	putReq, err := http.NewRequestWithContext(ctx, "PUT", uploadInfo.UploadURL, bytes.NewReader(data))
+	putReq, err := http.NewRequestWithContext(ctx, "PUT", uploadInfo.Data.UploadURL, bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("upload put request: %w", err)
 	}
@@ -291,11 +299,11 @@ func (c *WebClient) UploadMedia(ctx context.Context, data []byte, fileName, medi
 		return nil, fmt.Errorf("upload put status %d", putResp.StatusCode)
 	}
 
-	log.Printf("[upload] uploaded %s (%d bytes) -> %s", fileName, len(data), uploadInfo.ResourceURL)
+	log.Printf("[upload] uploaded %s (%d bytes) -> %s", fileName, len(data), uploadInfo.Data.ResourceURL)
 
 	// Step 3: Parse the file (required for images to be recognized by MiMo)
 	parseURL := fmt.Sprintf("%s/open-apis/resource/parse?fileUrl=%s&objectName=%s&model=mimo-v2.5-pro",
-		webBaseURL, url.QueryEscape(uploadInfo.ResourceURL), url.QueryEscape(uploadInfo.ObjectName))
+		webBaseURL, url.QueryEscape(uploadInfo.Data.ResourceURL), url.QueryEscape(uploadInfo.Data.ObjectName))
 
 	parseReq, err := http.NewRequestWithContext(ctx, "POST", parseURL, nil)
 	if err == nil {
@@ -321,8 +329,8 @@ func (c *WebClient) UploadMedia(ctx context.Context, data []byte, fileName, medi
 		MediaType: mediaType,
 		Name:      fileName,
 		Size:      int64(len(data)),
-		URL:       uploadInfo.ResourceURL,
-		FileURL:   uploadInfo.ResourceURL,
+		URL:       uploadInfo.Data.ResourceURL,
+		FileURL:   uploadInfo.Data.ResourceURL,
 		Status:    "completed",
 	}, nil
 }
