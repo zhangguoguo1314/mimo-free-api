@@ -510,12 +510,10 @@ func (p *Pool) Reload(accounts []config.Account) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// 构建新账号的 ID -> Account 映射
+	// 构建新账号的 ID -> Account 映射（包含禁用的，用于状态显示）
 	newMap := make(map[string]config.Account)
 	for _, acc := range accounts {
-		if acc.Active {
-			newMap[acc.ID] = acc
-		}
+		newMap[acc.ID] = acc
 	}
 
 	// 构建旧账号的 ID -> entry 映射
