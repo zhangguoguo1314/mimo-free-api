@@ -660,7 +660,9 @@ func handleChatError(p *pool.Pool, client *mimo.WebClient, err error) {
 }
 
 // streamWebToOpenAIWithThinking forwards MiMo SSE events to OpenAI SSE format in real-time.
-// Thinking content (wrapped in <think...> tags) is sent as reasoning_content.
+// MiMo SSE data format: {"type":"text","content":"..."} or {"content":"[DONE]"} or {"content":"msgId"}
+// Text content may contain <think...>\x00...thinking...\x00</think...\x00actual response
+// Thinking content is sent as reasoning_content, actual response as content.
 // Returns (hasContent, lastMsgID).
 func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model string, events <-chan mimo.WebSSEEvent, hasTools bool) (bool, string) {
 	flusher, ok := w.(http.Flusher)
@@ -673,9 +675,7 @@ func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model
 	var totalThinkingLen int
 	var lastMsgID string
 
-	// Regex to detect thinking tags
-	thinkStartRe := regexp.MustCompile(`(?s)^<think(?:\s[^>]*)?>`)
-	thinkEndRe := regexp.MustCompile(`(?s)</think\s*>$`)
+	// State machine for thinking detection within content
 	inThinking := false
 
 	for event := range events {
@@ -688,67 +688,98 @@ func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model
 			lastMsgID = event.ID
 		}
 
-		// Check if this is a thinking block
-		if thinkStartRe.MatchString(event.Data) {
-			inThinking = true
-			// Strip the <think...> tag
-			cleaned := thinkStartRe.ReplaceAllString(event.Data, "")
-			if cleaned != "" {
-				chunk := adapter.MakeOpenAIStreamThinkingChunk(model, cleaned)
-				fmt.Fprintf(w, "data: %s\n\n", chunk)
-				flusher.Flush()
-				totalThinkingLen += len(cleaned)
-				hasContent = true
+		// Parse MiMo JSON data format
+		var parsed struct {
+			Type    string `json:"type"`
+			Content string `json:"content"`
+		}
+		if err := json.Unmarshal([]byte(event.Data), &parsed); err != nil {
+			// Not JSON, treat as raw text (fallback)
+			parsed.Content = event.Data
+		}
+
+		// Skip non-text events (message IDs, usage, etc.)
+		if parsed.Type != "text" && parsed.Type != "" {
+			// Check for [DONE] marker
+			if strings.Contains(parsed.Content, "[DONE]") {
+				break
 			}
 			continue
 		}
 
-		if thinkEndRe.MatchString(event.Data) {
-			// Strip the </think...> tag
-			cleaned := thinkEndRe.ReplaceAllString(event.Data, "")
-			if cleaned != "" {
-				chunk := adapter.MakeOpenAIStreamThinkingChunk(model, cleaned)
-				fmt.Fprintf(w, "data: %s\n\n", chunk)
-				flusher.Flush()
-				totalThinkingLen += len(cleaned)
-				hasContent = true
-			}
-			inThinking = false
-			continue
-		}
-
-		if inThinking {
-			chunk := adapter.MakeOpenAIStreamThinkingChunk(model, event.Data)
-			fmt.Fprintf(w, "data: %s\n\n", chunk)
-			flusher.Flush()
-			totalThinkingLen += len(event.Data)
-			hasContent = true
-			continue
-		}
-
-		// Regular content - send as normal OpenAI chunk
-		// Filter out any remaining thinking tags
-		content := filterThinkingContent(event.Data)
+		content := parsed.Content
 		if content == "" {
 			continue
 		}
 
-		// Check for tool calls in content
-		if hasTools && toolcall.HasToolCallSyntax(content) {
-			// Accumulate tool call content and parse when complete
-			chunk := adapter.MakeOpenAIStreamChunk(model, content, false)
+		// Split content by null bytes (\x00) - MiMo uses null as separator
+		// Format: <think...>\x00thinking_text\x00</think\x00actual_response
+		parts := strings.Split(content, "\x00")
+		for _, part := range parts {
+			if part == "" {
+				continue
+			}
+
+			// Detect thinking start
+			if strings.HasPrefix(part, "<think") && !strings.Contains(part, "</think") {
+				inThinking = true
+				// Extract content after <think...> tag
+				after := regexp.MustCompile(`^<think[^>]*>`).ReplaceAllString(part, "")
+				if after != "" {
+					chunk := adapter.MakeOpenAIStreamThinkingChunk(model, after)
+					fmt.Fprintf(w, "data: %s\n\n", chunk)
+					flusher.Flush()
+					totalThinkingLen += len(after)
+					hasContent = true
+				}
+				continue
+			}
+
+			// Detect thinking end (may have content after </think...>)
+			if strings.Contains(part, "</think") {
+				beforeThink := regexp.MustCompile(`</think\s*>`).ReplaceAllString(part, "")
+				if beforeThink != "" {
+					chunk := adapter.MakeOpenAIStreamThinkingChunk(model, beforeThink)
+					fmt.Fprintf(w, "data: %s\n\n", chunk)
+					flusher.Flush()
+					totalThinkingLen += len(beforeThink)
+					hasContent = true
+				}
+				inThinking = false
+				continue
+			}
+
+			if inThinking {
+				chunk := adapter.MakeOpenAIStreamThinkingChunk(model, part)
+				fmt.Fprintf(w, "data: %s\n\n", chunk)
+				flusher.Flush()
+				totalThinkingLen += len(part)
+				hasContent = true
+				continue
+			}
+
+			// Regular content - filter any remaining thinking tags
+			cleaned := filterThinkingContent(part)
+			if cleaned == "" {
+				continue
+			}
+
+			// Check for tool calls
+			if hasTools && toolcall.HasToolCallSyntax(cleaned) {
+				chunk := adapter.MakeOpenAIStreamChunk(model, cleaned, false)
+				fmt.Fprintf(w, "data: %s\n\n", chunk)
+				flusher.Flush()
+				totalContentLen += len(cleaned)
+				hasContent = true
+				continue
+			}
+
+			chunk := adapter.MakeOpenAIStreamChunk(model, cleaned, false)
 			fmt.Fprintf(w, "data: %s\n\n", chunk)
 			flusher.Flush()
-			totalContentLen += len(content)
+			totalContentLen += len(cleaned)
 			hasContent = true
-			continue
 		}
-
-		chunk := adapter.MakeOpenAIStreamChunk(model, content, false)
-		fmt.Fprintf(w, "data: %s\n\n", chunk)
-		flusher.Flush()
-		totalContentLen += len(content)
-		hasContent = true
 	}
 
 	// Send finish chunk
