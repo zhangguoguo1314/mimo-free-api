@@ -47,11 +47,12 @@ func NewWebClient(serviceToken, userID, ph string) *WebClient {
 	}
 }
 
-// WebChatRequest 是网页端请求格式
+// WebChatRequest 网页端聊天请求
 // 注意：只包含官网实际发送的字段，多余的字段可能导致空回复
 type WebChatRequest struct {
 	MsgID          string       `json:"msgId"`
 	ConversationID string       `json:"conversationId"`
+	ParentID       string       `json:"parentId,omitempty"`
 	Query          string       `json:"query"`
 	IsEditedQuery  bool         `json:"isEditedQuery"`
 	ModelConfig    ModelConfig  `json:"modelConfig"`
@@ -78,6 +79,7 @@ func (c *WebClient) Chat(ctx context.Context, query, model, conversationID, pare
 	reqBody := WebChatRequest{
 		MsgID:          uuid.New().String(),
 		ConversationID: conversationID,
+		ParentID:       parentID,
 		Query:          query,
 		IsEditedQuery:  false,
 		ModelConfig: ModelConfig{
