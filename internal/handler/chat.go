@@ -243,6 +243,17 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 			} else {
 				multiMedias = uploaded
 				log.Printf("[media] uploaded %d media files successfully", len(uploaded))
+				// Write uploaded multiMedias info to response headers
+				for i, mm := range uploaded {
+					w.Header().Set(fmt.Sprintf("X-Uploaded-Media-%d-Type", i), mm.MediaType)
+					w.Header().Set(fmt.Sprintf("X-Uploaded-Media-%d-Name", i), mm.Name)
+					if mm.URL != "" {
+						w.Header().Set(fmt.Sprintf("X-Uploaded-Media-%d-URL", i), mm.URL)
+					}
+					if mm.FileURL != "" {
+						w.Header().Set(fmt.Sprintf("X-Uploaded-Media-%d-FileURL", i), mm.FileURL)
+					}
+				}
 			}
 		}
 
