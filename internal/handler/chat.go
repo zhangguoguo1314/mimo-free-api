@@ -1194,6 +1194,11 @@ func extractContentString(content interface{}) string {
 func buildConversationQuery(msgs []adapter.OpenAIMessage) string {
 	var sb strings.Builder
 	for _, msg := range msgs {
+		// Skip system messages - they contain router/proxy markers, not conversation content.
+		// Including them causes base64 leaks and "text too long" errors from MiMo.
+		if msg.Role == "system" {
+			continue
+		}
 		content := extractContentString(msg.Content)
 		if content == "" {
 			continue
@@ -1209,11 +1214,6 @@ func buildConversationQuery(msgs []adapter.OpenAIMessage) string {
 			sb.WriteString("\n")
 		case "assistant":
 			sb.WriteString("assistant: ")
-			sb.WriteString(content)
-			sb.WriteString("\n")
-		case "system":
-			// Include system messages as context prefix
-			sb.WriteString("[system]: ")
 			sb.WriteString(content)
 			sb.WriteString("\n")
 		}
