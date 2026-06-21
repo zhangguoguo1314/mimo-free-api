@@ -368,6 +368,8 @@ func (h *ChatHandler) streamWebToOpenAI(w http.ResponseWriter, model string, eve
 		}
 		c := strings.ReplaceAll(msg.Content, "\u0000", "")
 		c, inThinking = filterThinkingChunk(c, inThinking)
+		// Filter base64-encoded OpenAI chunks that MiMo echoes back
+		c = filterThinkingContent(c)
 		if c == "" {
 			msgIdx++
 			continue
@@ -446,23 +448,101 @@ func filterThinkingChunk(content string, inThinking bool) (string, bool) {
 	return result.String(), inThinking
 }
 
+// isBase64Fragment checks if a string looks like a base64-encoded JSON payload.
+// These are OpenAI SSE chunks that MiMo client echoes back as messages.
+func isBase64Fragment(s string) bool {
+	// Must start with "eyJ" (base64 of '{"')
+	if !strings.HasPrefix(s, "eyJ") {
+		return false
+	}
+	// Check if it contains only base64 characters (alphanumeric, +, /, =)
+	for _, c := range s {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=') {
+			return false
+		}
+	}
+	// Must be at least 4 chars (minimum base64 block)
+	return len(s) >= 4
+}
+
+// b64BufferState manages buffering of base64 fragments that may be split across
+// multiple SSE chunks by MiMo's \x00 null byte separator.
+type b64BufferState struct {
+	buffer    strings.Builder
+	isBuffering bool
+}
+
+// processPart handles a single part after \x00 splitting.
+// It returns the cleaned content (empty string if the part should be skipped).
+func (b *b64BufferState) processPart(part string) string {
+	// If we're currently buffering a base64 fragment
+	if b.isBuffering {
+		// Check if this part continues the base64 or ends it
+		if isBase64Fragment(part) {
+			// Still base64, keep buffering
+			b.buffer.WriteString(part)
+			return ""
+		}
+		// The base64 sequence ended - discard the buffer and process this part normally
+		b.isBuffering = false
+		b.buffer.Reset()
+		// Fall through to process this part below
+	}
+
+	// Check if this part is entirely a base64 sequence
+	if isBase64Fragment(part) {
+		b.buffer.WriteString(part)
+		b.isBuffering = true
+		return ""
+	}
+
+	// Handle mixed content: base64 embedded within normal text
+	// e.g., "eyJ...base64...=你好！有什么我可以帮你的吗？"
+	// Remove any base64 fragments from the middle of content
+	cleaned := b64CleanRe.ReplaceAllString(part, "")
+	cleaned = strings.TrimSpace(cleaned)
+	if cleaned == "" {
+		return ""
+	}
+
+	return cleaned
+}
+
+// flush returns any remaining buffered content (shouldn't normally happen)
+func (b *b64BufferState) flush() string {
+	if b.isBuffering && b.buffer.Len() > 0 {
+		content := b.buffer.String()
+		b.buffer.Reset()
+		b.isBuffering = false
+		return content
+	}
+	return ""
+}
+
+// Pre-compiled regex patterns for content filtering
+var (
+	b64CleanRe    = regexp.MustCompile(`eyJ[a-zA-Z0-9+/=]{4,}`)
+	thinkBlockRe  = regexp.MustCompile(`(?s)<think\b[^>]*>.*?</think\s*>`)
+	thinkTagRe    = regexp.MustCompile(`^<think[^>]*>`)
+	endThinkTagRe = regexp.MustCompile(`</think\s*>`)
+	mimoStatusRe  = regexp.MustCompile(`mimo returned (\d+)`)
+)
+
 // filterThinkingContent 从完整文本中移除 <think...>...</think...> 标签及其内容
 func filterThinkingContent(content string) string {
 	// 移除 \u0000 字符
 	content = strings.ReplaceAll(content, "\u0000", "")
 
 	// 使用正则表达式移除 <think...>...</think...> 块
-	re := regexp.MustCompile(`(?s)<think\b[^>]*>.*?</think\s*>`)
-	content = re.ReplaceAllString(content, "")
+	content = thinkBlockRe.ReplaceAllString(content, "")
 
 	// 移除 [DONE] 标记
 	content = strings.TrimSuffix(content, "[DONE]")
 	content = strings.TrimSpace(content)
 
 	// Remove base64-encoded OpenAI request/response bodies that MiMo echoes back.
-	// Pattern: eJ[Base64] followed by actual content
-	b64Re := regexp.MustCompile(`eyJ[a-zA-Z0-9+/=]{20,}`)
-	content = b64Re.ReplaceAllString(content, "")
+	// Use lower threshold of 4 chars to catch fragments, but require eyJ prefix
+	content = b64CleanRe.ReplaceAllString(content, "")
 
 	content = strings.TrimSpace(content)
 	return content
@@ -628,9 +708,6 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	})
 }
 
-// mimoStatusRe 用于从错误信息 "mimo returned 401: ..." 中提取 HTTP 状态码
-var mimoStatusRe = regexp.MustCompile(`mimo returned (\d+)`)
-
 // extractMimoStatusCode 从错误信息中解析 mimo 返回的 HTTP 状态码。
 // 错误格式为 fmt.Errorf("mimo returned %d: %s", statusCode, body)。
 // 如果无法解析，返回 0。
@@ -695,6 +772,15 @@ func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model
 	// State machine for thinking detection within content
 	inThinking := false
 
+	// Base64 buffer state machine to catch base64 fragments split across \x00 boundaries
+	var b64Buf b64BufferState
+	defer func() {
+		// Log any remaining buffered base64 that wasn't flushed
+		if leftover := b64Buf.flush(); leftover != "" {
+			log.Printf("[stream] b64 buffer leftover (len=%d): %q", len(leftover), leftover[:min(len(leftover), 100)])
+		}
+	}()
+
 	for event := range events {
 		if event.Data == "" {
 			continue
@@ -757,11 +843,17 @@ func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model
 				continue
 			}
 
+			// Run through base64 buffer state machine first
+			part = b64Buf.processPart(part)
+			if part == "" {
+				continue
+			}
+
 			// Detect thinking start
 			if strings.HasPrefix(part, "<think") && !strings.Contains(part, "</think") {
 				inThinking = true
 				// Extract content after <think...> tag
-				after := regexp.MustCompile(`^<think[^>]*>`).ReplaceAllString(part, "")
+				after := thinkTagRe.ReplaceAllString(part, "")
 				if after != "" {
 					chunk := adapter.MakeOpenAIStreamThinkingChunk(model, after)
 					fmt.Fprintf(w, "data: %s\n\n", chunk)
@@ -774,7 +866,7 @@ func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model
 
 			// Detect thinking end (may have content after </think...>)
 			if strings.Contains(part, "</think") {
-				beforeThink := regexp.MustCompile(`</think\s*>`).ReplaceAllString(part, "")
+				beforeThink := endThinkTagRe.ReplaceAllString(part, "")
 				if beforeThink != "" {
 					chunk := adapter.MakeOpenAIStreamThinkingChunk(model, beforeThink)
 					fmt.Fprintf(w, "data: %s\n\n", chunk)
@@ -1004,6 +1096,8 @@ func (h *MessagesHandler) Handle(w http.ResponseWriter, r *http.Request) {
 			if msg.Type == "text" && msg.Content != "" {
 				c := strings.ReplaceAll(msg.Content, "\u0000", "")
 				c, inThinking = filterThinkingChunk(c, inThinking)
+				// Filter base64-encoded OpenAI chunks that MiMo echoes back
+				c = filterThinkingContent(c)
 				if c != "" {
 					buffered.WriteString(c)
 					// Always stream text chunks immediately
@@ -1069,6 +1163,8 @@ func (h *MessagesHandler) Handle(w http.ResponseWriter, r *http.Request) {
 				if err := json.Unmarshal([]byte(event.Data), &msg); err == nil && msg.Type == "text" {
 					c := strings.ReplaceAll(msg.Content, "\u0000", "")
 					c, inThinking = filterThinkingChunk(c, inThinking)
+					// Filter base64-encoded OpenAI chunks that MiMo echoes back
+					c = filterThinkingContent(c)
 					content.WriteString(c)
 				}
 			}
