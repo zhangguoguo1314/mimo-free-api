@@ -359,8 +359,14 @@ export function ConfigPanel() {
       const accountsArray = data.accounts || (Array.isArray(data) ? data : [])
       const result = await importAccounts(accountsArray)
       setImportResult(result)
-      loadConfig()
+      // Reload config and pool status with a small delay to ensure backend has fully processed
+      await Promise.all([
+        loadConfig(),
+        new Promise(r => setTimeout(r, 500))
+      ])
       loadPoolStatus()
+      // Double-check pool status after another delay
+      setTimeout(() => loadPoolStatus(), 1000)
     } catch (e) {
       alert(lang === 'zh' ? '导入失败: ' + (e as Error).message : 'Import failed: ' + (e as Error).message)
     } finally {

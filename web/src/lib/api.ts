@@ -92,7 +92,17 @@ export async function importAccounts(accounts: any[]): Promise<{added: number; s
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ accounts })
   })
-  return res.json()
+  if (!res.ok) {
+    const err = await res.text().catch(() => 'Unknown error')
+    throw new Error(`Import failed (${res.status}): ${err}`)
+  }
+  const data = await res.json()
+  // Ensure added/skipped are numbers even if backend returns them differently
+  return {
+    added: Number(data.added) || 0,
+    skipped: Number(data.skipped) || 0,
+    errors: data.errors
+  }
 }
 
 // 替换Cookie
