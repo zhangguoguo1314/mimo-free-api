@@ -248,7 +248,7 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 			fmt.Fprintf(w, "data: %s\n\n", initData)
 			flusher.Flush()
 
-			hasContent, lastMsgID := h.streamWebToOpenAIWithThinking(w, model, eventsCh, len(req.Tools) > 0)
+			hasContent, lastMsgID, _ := h.streamWebToOpenAIWithThinking(w, model, eventsCh, len(req.Tools) > 0)
 
 			stats.Get().DecrConcurrency()
 
@@ -673,8 +673,8 @@ func handleChatError(p *pool.Pool, client *mimo.WebClient, err error) {
 // MiMo SSE data format: {"type":"text","content":"..."} or {"content":"[DONE]"} or {"content":"msgId"}
 // Text content may contain <think...>\x00...thinking...\x00</think...\x00actual response
 // Thinking content is sent as reasoning_content, actual response as content.
-// Returns (hasContent, lastMsgID).
-func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model string, events <-chan mimo.WebSSEEvent, hasTools bool) (bool, string) {
+// Returns (hasContent, lastMsgID, usage).
+func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model string, events <-chan mimo.WebSSEEvent, hasTools bool) (bool, string, adapter.OpenAIUsage) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		flusher = &noopFlusher{}
@@ -684,6 +684,7 @@ func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model
 	var totalContentLen int
 	var totalThinkingLen int
 	var lastMsgID string
+	var usage adapter.OpenAIUsage
 
 	// State machine for thinking detection within content
 	inThinking := false
@@ -713,6 +714,18 @@ func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model
 			// Check for [DONE] marker
 			if strings.Contains(parsed.Content, "[DONE]") {
 				break
+			}
+			// Extract usage data from MiMo
+			if strings.Contains(event.Data, "promptTokens") || strings.Contains(event.Data, "completionTokens") {
+				var u struct {
+					PromptTokens     int `json:"promptTokens"`
+					CompletionTokens int `json:"completionTokens"`
+				}
+				if json.Unmarshal([]byte(event.Data), &u) == nil {
+					usage.PromptTokens = u.PromptTokens
+					usage.CompletionTokens = u.CompletionTokens
+					usage.TotalTokens = u.PromptTokens + u.CompletionTokens
+				}
 			}
 			continue
 		}
@@ -806,13 +819,17 @@ func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model
 	fmt.Fprintf(w, "data: [DONE]\n\n")
 	flusher.Flush()
 
-	// Record stats
-	completionTokens := estimateTokens(fmt.Sprintf("%d", totalContentLen)) + estimateTokens(fmt.Sprintf("%d", totalThinkingLen))
-	stats.Get().Record(model, 0, completionTokens, 0, totalThinkingLen, completionTokens)
+	// Record stats with actual usage from MiMo, fallback to estimation
+	if usage.TotalTokens == 0 {
+		usage.PromptTokens = estimateTokens(fmt.Sprintf("%d", totalContentLen))
+		usage.CompletionTokens = estimateTokens(fmt.Sprintf("%d", totalContentLen)) + estimateTokens(fmt.Sprintf("%d", totalThinkingLen))
+		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	}
+	stats.Get().Record(model, usage.PromptTokens, usage.CompletionTokens, 0, totalThinkingLen, usage.TotalTokens)
 
-	log.Printf("[stream] done: contentLen=%d thinkingLen=%d lastMsgID=%s", totalContentLen, totalThinkingLen, lastMsgID)
+	log.Printf("[stream] done: contentLen=%d thinkingLen=%d lastMsgID=%s usage=%+v", totalContentLen, totalThinkingLen, lastMsgID, usage)
 
-	return hasContent, lastMsgID
+	return hasContent, lastMsgID, usage
 }
 
 func ModelsHandler(w http.ResponseWriter, r *http.Request) {
