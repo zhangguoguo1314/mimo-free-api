@@ -1608,6 +1608,7 @@ func extractMediaFromMessages(msgs []adapter.OpenAIMessage) []pendingMedia {
 // uploadMediaFiles uploads pending media files to MiMo's storage using the provided client.
 func uploadMediaFiles(ctx context.Context, client *mimo.WebClient, pending []pendingMedia) ([]mimo.MultiMedia, error) {
 	var result []mimo.MultiMedia
+	var errs []string
 
 	for _, m := range pending {
 		if m.URL != "" {
@@ -1625,10 +1626,16 @@ func uploadMediaFiles(ctx context.Context, client *mimo.WebClient, pending []pen
 		// Upload base64 data
 		uploaded, err := client.UploadMedia(ctx, m.Data, m.FileName, m.MediaType)
 		if err != nil {
-			log.Printf("[media] failed to upload %s: %v", m.FileName, err)
+			errMsg := fmt.Sprintf("upload %s: %v", m.FileName, err)
+			log.Printf("[media] %s", errMsg)
+			errs = append(errs, errMsg)
 			continue
 		}
 		result = append(result, *uploaded)
+	}
+
+	if len(result) == 0 && len(errs) > 0 {
+		return nil, fmt.Errorf("all uploads failed: %s", strings.Join(errs, "; "))
 	}
 
 	return result, nil
