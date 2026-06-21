@@ -138,6 +138,7 @@ type WebSSEEvent struct {
 // ParseWebSSE 解析网页端 SSE 流
 func ParseWebSSE(ctx context.Context, reader io.ReadCloser, events chan<- WebSSEEvent) error {
 	defer reader.Close()
+	defer close(events) // Critical: close channel so range loop in consumer exits
 	// 使用 bufio.Reader 逐行读取，支持 \n 和 \r\n
 	br := bufio.NewReader(reader)
 
@@ -148,6 +149,11 @@ func ParseWebSSE(ctx context.Context, reader io.ReadCloser, events chan<- WebSSE
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
+		}
+
+		// Set read deadline to prevent permanent blocking if MiMo stops sending data
+		if conn, ok := reader.(interface{ SetReadDeadline(time.Time) error }); ok {
+			conn.SetReadDeadline(time.Now().Add(120 * time.Second))
 		}
 
 		line, err := br.ReadString('\n')
