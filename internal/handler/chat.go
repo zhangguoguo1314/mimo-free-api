@@ -164,6 +164,7 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 		var release func()
 		var clientIdx int
 		var err error
+		var released bool
 
 		boundIdx := h.convStore.GetAcctIdx(key)
 		if boundIdx >= 0 {
@@ -188,6 +189,15 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 			continue
 		}
 
+		// Ensure release is always called, even on panic or blocked goroutines
+		doRelease := func() {
+			if !released {
+				released = true
+				release()
+			}
+		}
+		defer doRelease()
+
 		// Bind this conversation to the acquired account (if not already bound)
 		if boundIdx < 0 && clientIdx >= 0 {
 			h.convStore.SetAcctIdx(key, clientIdx)
@@ -201,7 +211,7 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 		body, err := client.Chat(ctx, query, model, convID, parentID, true)
 		if err != nil {
 			stats.Get().DecrConcurrency()
-			release()
+			doRelease()
 			handleChatError(h.pool, client, err)
 			// Unbind from failed account so next retry picks a new one
 			h.convStore.UnbindAcct(key)
@@ -253,11 +263,11 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 				}
 				// Save conversation in background
 				go client.SaveConversation(context.Background(), convID, query)
-				release()
+				doRelease()
 				return
 			}
 
-			release()
+			doRelease()
 			log.Printf("[retry] empty response from account, will retry")
 			// Empty response: delete conversation state to get fresh context on retry
 			h.convStore.Delete(key)
@@ -267,7 +277,7 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 			body.Close()
 			stats.Get().DecrConcurrency()
 			if err != nil {
-				release()
+				doRelease()
 				if attempt == maxRetries {
 					writeError(w, http.StatusBadGateway, fmt.Sprintf("read response: %v", err))
 					return
@@ -281,7 +291,7 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 			if content != "" {
 				h.writeNonStreamResponse(w, model, content, len(req.Tools) > 0)
 				go client.SaveConversation(context.Background(), convID, query)
-				release()
+				doRelease()
 				return
 			}
 
@@ -290,7 +300,7 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 				h.convStore.Delete(key)
 			}
 
-			release()
+			doRelease()
 			log.Printf("[retry] empty response from account, will retry")
 		}
 	}
