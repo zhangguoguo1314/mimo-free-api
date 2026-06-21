@@ -113,10 +113,13 @@ func (p *Pool) Acquire() (*mimo.WebClient, func(), error) {
 
 	now := time.Now()
 
-	// 第一轮：加权随机选择（healthy 且未冷却的账号才有权重）
+	// 第一轮：加权随机选择（healthy 且 enabled 且未冷却的账号才有权重）
 	var candidates []weightedEntry
 	for _, e := range p.clients {
 		if !e.healthy {
+			continue
+		}
+		if !e.account.Active {
 			continue
 		}
 		cd := atomic.LoadInt64(&e.cooldownAt)
@@ -413,6 +416,7 @@ func (p *Pool) Status() []AccountStatus {
 		}
 		statuses = append(statuses, AccountStatus{
 			ID:               e.account.ID,
+			Enabled:          e.account.Active,
 			Healthy:          e.healthy,
 			ActiveRequests:   atomic.LoadInt32(&e.active),
 			CooldownRemaining: cooldownRemaining,
@@ -432,6 +436,7 @@ func (p *Pool) Status() []AccountStatus {
 // AccountStatus 账号状态信息
 type AccountStatus struct {
 	ID                string        `json:"id"`
+	Enabled           bool          `json:"enabled"`
 	Healthy           bool          `json:"healthy"`
 	ActiveRequests    int32         `json:"active"`
 	CooldownRemaining time.Duration `json:"cooldown_remaining"`

@@ -128,6 +128,7 @@ func main() {
 			r.Post("/config", adminHandler.UpdateConfig)
 			r.Post("/accounts", adminHandler.AddAccount)
 			r.Delete("/accounts", adminHandler.DeleteAccount)
+			r.Post("/accounts/toggle", adminHandler.ToggleAccount)
 			r.Post("/accounts/test", adminHandler.TestAccount)
 			r.Post("/accounts/test-model", adminHandler.TestModel)
 			r.Post("/accounts/test-all-models", adminHandler.TestAllModels)

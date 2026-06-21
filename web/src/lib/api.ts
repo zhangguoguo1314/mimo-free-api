@@ -39,6 +39,7 @@ export async function testAccountAllModels(accountId: string): Promise<{account_
 
 export interface PoolStatus {
   id: string
+  enabled: boolean
   healthy: boolean
   active: number
   rate_used: number
@@ -54,6 +55,15 @@ export interface PoolStatus {
 export async function fetchPoolStatus(): Promise<{ total: number; accounts: PoolStatus[] }> {
   const res = await apiFetch('/admin/api/pool/status')
   return res.json()
+}
+
+// Toggle account enabled/disabled
+export async function toggleAccount(id: string, enabled: boolean): Promise<void> {
+  await apiFetch('/admin/api/accounts/toggle', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, enabled })
+  })
 }
 
 // 账号池全量测试

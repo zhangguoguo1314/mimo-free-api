@@ -155,6 +155,35 @@ func (h *AdminHandler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"status": "deleted"})
 }
 
+// ToggleAccount enables or disables an account by ID
+func (h *AdminHandler) ToggleAccount(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID      string `json:"id"`
+		Enabled bool   `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
+		writeError(w, http.StatusBadRequest, "id and enabled are required")
+		return
+	}
+	found := false
+	config.Update(func(cfg *config.Config) {
+		for i, acc := range cfg.Accounts {
+			if acc.ID == req.ID {
+				cfg.Accounts[i].Active = req.Enabled
+				found = true
+				break
+			}
+		}
+	})
+	if !found {
+		writeError(w, http.StatusNotFound, "account not found")
+		return
+	}
+	config.Save()
+	h.pool.Reload(config.Get().Accounts)
+	writeJSON(w, map[string]interface{}{"status": "updated", "id": req.ID, "enabled": req.Enabled})
+}
+
 func (h *AdminHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, h.pool.HealthCheck(r.Context()))
 }

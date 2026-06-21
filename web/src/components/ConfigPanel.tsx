@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Key, Cpu, Save, Eye, EyeOff, Check, Loader2, Users, Plus, Trash2, Globe, ClipboardPaste, TestTube, Download, Upload, RefreshCw, X, Activity, ShieldAlert, Clock } from 'lucide-react'
 import { useSettings } from '../contexts/SettingsContext'
-import { apiFetch, testAccountModel, testPoolAll, exportAccounts, importAccounts, replaceCookie, fetchPoolStatus, type PoolStatus } from '../lib/api'
+import { apiFetch, testAccountModel, testPoolAll, exportAccounts, importAccounts, replaceCookie, fetchPoolStatus, toggleAccount, type PoolStatus } from '../lib/api'
 
 interface Account {
   id: string
@@ -558,6 +558,23 @@ export function ConfigPanel() {
                     <div className="flex items-center gap-2 mb-1.5">
                       <div className={`w-2.5 h-2.5 rounded-full ${colorClass}`} />
                       <span className={`text-xs font-medium truncate ${isDark ? 'text-gray-200' : 'text-gray-700'}`}>{s.id}</span>
+                      {/* Enable/Disable toggle */}
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation()
+                          const newEnabled = !s.enabled
+                          try {
+                            await toggleAccount(s.id, newEnabled)
+                            loadPoolStatus()
+                          } catch (err) {
+                            console.error('Toggle failed', err)
+                          }
+                        }}
+                        className={`ml-auto w-8 h-4 rounded-full transition-colors duration-200 flex-shrink-0 ${s.enabled ? 'bg-emerald-500' : 'bg-gray-500/30'}`}
+                        title={s.enabled ? (lang === 'zh' ? '点击禁用' : 'Click to disable') : (lang === 'zh' ? '点击启用' : 'Click to enable')}
+                      >
+                        <div className={`w-3 h-3 rounded-full bg-white shadow-sm transition-transform duration-200 ${s.enabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                      </button>
                     </div>
                     <div className="space-y-0.5">
                       <div className="flex items-center justify-between text-[10px]">
