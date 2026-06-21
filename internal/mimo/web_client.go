@@ -98,6 +98,11 @@ func (c *WebClient) Chat(ctx context.Context, query, model, conversationID, pare
 		return nil, fmt.Errorf("marshal: %w", err)
 	}
 
+	// Debug: log multiMedias in request
+	if len(multiMedias) > 0 {
+		log.Printf("[chat] sending %d multiMedias: %s", len(multiMedias), string(body[:min(len(body), 500)]))
+	}
+
 	reqURL := fmt.Sprintf("%s%s?xiaomichatbot_ph=%s", webBaseURL, chatAPI, url.QueryEscape(c.ph))
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewReader(body))
 	if err != nil {
