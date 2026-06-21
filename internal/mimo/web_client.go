@@ -232,6 +232,15 @@ type UploadInfoData struct {
 	ResourceID  string `json:"resourceId"`
 }
 
+// ParseResponse is the response from resource/parse
+type ParseResponse struct {
+	Code int `json:"code"`
+	Msg  string `json:"msg"`
+	Data struct {
+		ID string `json:"id"`
+	} `json:"data"`
+}
+
 // UploadMedia uploads a media file to MiMo's storage and returns the resource URL.
 // Steps: 1) genUploadInfo 2) PUT upload 3) return resourceUrl
 func (c *WebClient) UploadMedia(ctx context.Context, data []byte, fileName, mediaType string) (*MultiMedia, error) {
@@ -302,34 +311,67 @@ func (c *WebClient) UploadMedia(ctx context.Context, data []byte, fileName, medi
 	log.Printf("[upload] uploaded %s (%d bytes) -> %s", fileName, len(data), uploadInfo.Data.ResourceURL)
 
 	// Step 3: Parse the file (required for images to be recognized by MiMo)
-	parseURL := fmt.Sprintf("%s/open-apis/resource/parse?fileUrl=%s&objectName=%s&model=mimo-v2.5-pro",
-		webBaseURL, url.QueryEscape(uploadInfo.Data.ResourceURL), url.QueryEscape(uploadInfo.Data.ObjectName))
+	// Must include xiaomichatbot_ph query parameter
+	parseURL := fmt.Sprintf("%s/open-apis/resource/parse?fileUrl=%s&objectName=%s&model=mimo-v2.5-pro&xiaomichatbot_ph=%s",
+		webBaseURL,
+		url.QueryEscape(uploadInfo.Data.ResourceURL),
+		url.QueryEscape(uploadInfo.Data.ObjectName),
+		url.QueryEscape(c.ph))
 
-	parseReq, err := http.NewRequestWithContext(ctx, "POST", parseURL, nil)
-	if err == nil {
+	var resourceID string
+	for retry := 0; retry < 3; retry++ {
+		parseReq, err := http.NewRequestWithContext(ctx, "POST", parseURL, bytes.NewReader([]byte("{}")))
+		if err != nil {
+			log.Printf("[upload] create parse request failed: %v", err)
+			break
+		}
 		c.setCommonHeaders(parseReq)
+
 		parseResp, err := c.httpClient.Do(parseReq)
 		if err != nil {
-			log.Printf("[upload] parse request failed: %v", err)
-		} else {
-			defer parseResp.Body.Close()
-			if parseResp.StatusCode == http.StatusOK {
-				log.Printf("[upload] parse success for %s", fileName)
-			} else {
-				parseBody, _ := io.ReadAll(parseResp.Body)
-				log.Printf("[upload] parse status %d: %s", parseResp.StatusCode, string(parseBody[:200]))
-			}
+			log.Printf("[upload] parse request failed (attempt %d): %v", retry+1, err)
+			time.Sleep(2 * time.Second)
+			continue
 		}
-	} else {
-		log.Printf("[upload] create parse request failed: %v", err)
+
+		parseBody, _ := io.ReadAll(parseResp.Body)
+		parseResp.Body.Close()
+
+		if parseResp.StatusCode != http.StatusOK {
+			log.Printf("[upload] parse status %d (attempt %d): %s", parseResp.StatusCode, retry+1, string(parseBody[:min(len(parseBody), 300)]))
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		var parseResult ParseResponse
+		if err := json.Unmarshal(parseBody, &parseResult); err != nil {
+			log.Printf("[upload] parse decode error: %v, body: %s", err, string(parseBody[:min(len(parseBody), 200)]))
+			break
+		}
+
+		if parseResult.Data.ID != "" {
+			resourceID = parseResult.Data.ID
+			log.Printf("[upload] parse success: resourceId=%s", resourceID)
+			break
+		}
+
+		log.Printf("[upload] parse returned empty id (attempt %d): %s", retry+1, string(parseBody[:min(len(parseBody), 200)]))
+		time.Sleep(2 * time.Second)
 	}
 
-	// Step 4: Return MultiMedia with the resource URL
+	if resourceID == "" {
+		log.Printf("[upload] WARNING: parse failed to return resourceId, using resourceUrl as fallback")
+		resourceID = uploadInfo.Data.ResourceURL
+	}
+
+	// Step 4: Return MultiMedia with correct fields
+	// CRITICAL: url field = resourceId (from parse), NOT resourceUrl
+	// fileUrl field = resourceUrl (the actual file URL)
 	return &MultiMedia{
 		MediaType: mediaType,
 		Name:      fileName,
 		Size:      int64(len(data)),
-		URL:       uploadInfo.Data.ResourceURL,
+		URL:       resourceID,
 		FileURL:   uploadInfo.Data.ResourceURL,
 		Status:    "completed",
 	}, nil
