@@ -129,7 +129,8 @@ func (h *ChatHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	h.handleWebChat(ctx, w, &req, routeResult.Model, req.Stream)
 }
 
-// handleWebChat 使用网页端反代 — 有状态模式（复用 MiMo conversationId + parentId）
+// handleWebChat 使用网页端反代 — 真正的流式模式
+// 直接将 MiMo SSE 流转发为 OpenAI SSE 流，不缓冲整个响应
 // 支持空回复自动重试：检测到空内容时切换账号重试，最多重试2次
 func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, req *adapter.OpenAIChatRequest, model string, stream bool) {
 	// Extract latest user message as query (not full history)
@@ -149,12 +150,6 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 	}
 
 	maxRetries := 2
-	var finalText string
-	var finalUsage *usageData
-	var finalLastMsgID string
-	var finalConvID string
-	var finalClient *mimo.WebClient
-	var finalRelease func()
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
@@ -165,9 +160,6 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 		client, release, err := h.pool.Acquire()
 		if err != nil {
 			if attempt == maxRetries {
-				if finalRelease != nil {
-					finalRelease()
-				}
 				writeError(w, http.StatusServiceUnavailable, err.Error())
 				return
 			}
@@ -177,138 +169,28 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 		convID, parentID := h.convStore.GetOrCreate(key)
 
 		stats.Get().IncrConcurrency()
-		body, err := client.Chat(ctx, query, model, convID, parentID, false)
+		// Enable thinking so MiMo returns reasoning content
+		body, err := client.Chat(ctx, query, model, convID, parentID, true)
 		if err != nil {
 			stats.Get().DecrConcurrency()
 			release()
 			handleChatError(h.pool, client, err)
 			if attempt == maxRetries {
-				if finalRelease != nil {
-					finalRelease()
-				}
 				writeError(w, http.StatusBadGateway, fmt.Sprintf("mimo error: %v", err))
 				return
 			}
 			continue
 		}
 
-		// 读取整个响应体
-		respBody, err := io.ReadAll(body)
-		body.Close()
-		stats.Get().DecrConcurrency()
-		if err != nil {
-			release()
-			if attempt == maxRetries {
-				if finalRelease != nil {
-					finalRelease()
-				}
-				writeError(w, http.StatusBadGateway, fmt.Sprintf("read response: %v", err))
-				return
-			}
-			continue
-		}
-
-		// 使用 extractTextFromSSE 提取内容（与 testModelChat 相同）
-		content, errMsg := extractTextFromSSE(string(respBody))
-		// 过滤 thinking 内容（<think...>...</think...>）
-		content = filterThinkingContent(content)
-		log.Printf("[sse] attempt=%d textLen=%d content=%q errMsg=%q", attempt, len(content), truncate(content, 100), errMsg)
-
-		var textContent strings.Builder
-		var hasContent bool
-		if content != "" {
-			textContent.WriteString(content)
-			hasContent = true
-		} else if errMsg != "" {
-			// MiMo 返回了错误信息（如"没有权限操作"），清除对话状态并标记为失败以便重试
-			log.Printf("[sse] attempt=%d got error from MiMo: %s, resetting conversation", attempt, errMsg)
-			h.convStore.Delete(key)
-		}
-
-		// 尝试从响应中提取 lastMsgID
-		var lastMsgID string
-		// 简单解析 SSE 来提取额外信息
-		lines := strings.Split(string(respBody), "\n")
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "id:") {
-				lastMsgID = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
-			}
-		}
-
-		// MiMo 不返回 usage 数据，基于文本长度估算 token 数量
-		// 中文字符约 1.5 tokens，英文约 0.75 tokens
-		promptTokens := estimateTokens(query)
-		completionTokens := estimateTokens(content)
-		usage := &usageData{
-			PromptTokens:     promptTokens,
-			CompletionTokens: completionTokens,
-			TotalTokens:      promptTokens + completionTokens,
-		}
-
-		if hasContent {
-			// 成功了，释放之前的账号（如果有）
-			if finalRelease != nil {
-				finalRelease()
-			}
-			finalText = textContent.String()
-			finalUsage = usage
-			finalLastMsgID = lastMsgID
-			finalConvID = convID
-			finalClient = client
-			finalRelease = release
-			break
-		}
-
-		// 空回复，保存当前结果（可能是最后一次）
-		if finalRelease != nil {
-			finalRelease()
-		}
-		finalText = textContent.String()
-		finalUsage = usage
-		finalLastMsgID = lastMsgID
-		finalConvID = convID
-		finalClient = client
-		finalRelease = release
-
-		log.Printf("[retry] empty response from account, will retry")
-		// 空回复不标记 cooldown，因为可能是临时问题
-	}
-
-	// 写入最终响应
-	if finalText != "" {
-		// 有内容，写入成功响应
 		if stream {
-			h.writeStreamResponse(w, model, finalText, len(req.Tools) > 0)
-		} else {
-			h.writeNonStreamResponse(w, model, finalText, len(req.Tools) > 0)
-		}
-		if finalUsage != nil {
-			cached := 0
-			reasoning := 0
-			if finalUsage.NativeUsage != nil {
-				if finalUsage.NativeUsage.PromptDetails != nil {
-					cached = finalUsage.NativeUsage.PromptDetails.CachedTokens
-				}
-				if finalUsage.NativeUsage.CompletionDetails != nil {
-					reasoning = finalUsage.NativeUsage.CompletionDetails.ReasoningTokens
-				}
-			}
-			stats.Get().Record(model, finalUsage.PromptTokens, finalUsage.CompletionTokens, cached, reasoning, finalUsage.TotalTokens)
-		}
-		if finalConvID != "" {
-			go finalClient.SaveConversation(context.Background(), finalConvID, query)
-		}
-		if finalLastMsgID != "" {
-			h.convStore.SetParentID(key, finalLastMsgID)
-		}
-		finalRelease()
-	} else {
-		// 所有重试都失败，返回空或错误
-		if finalRelease != nil {
-			finalRelease()
-		}
-		if stream {
+			// True streaming: forward MiMo SSE events to OpenAI SSE in real-time
+			eventsCh := make(chan mimo.WebSSEEvent, 100)
+			parseErrCh := make(chan error, 1)
+			go func() {
+				parseErrCh <- mimo.ParseWebSSE(ctx, body, eventsCh)
+			}()
+
+			// Set up SSE headers immediately so 9Router sees first byte
 			flusher, ok := w.(http.Flusher)
 			if !ok {
 				flusher = &noopFlusher{}
@@ -316,14 +198,87 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.Header().Set("Cache-Control", "no-cache")
 			w.Header().Set("Connection", "keep-alive")
+			w.Header().Set("X-Accel-Buffering", "no")
 			w.WriteHeader(http.StatusOK)
-			finishChunk := adapter.MakeOpenAIStreamChunk(model, "", true)
-			fmt.Fprintf(w, "data: %s\n\n", finishChunk)
-			fmt.Fprintf(w, "data: [DONE]\n\n")
+
+			// Send initial role chunk immediately so 9Router doesn't timeout
+			initChunk := adapter.MakeOpenAIStreamChunk(model, "", false)
+			// Set role in the initial chunk
+			initData, _ := json.Marshal(initChunk)
+			fmt.Fprintf(w, "data: %s\n\n", initData)
 			flusher.Flush()
+
+			hasContent := h.streamWebToOpenAIWithThinking(w, model, eventsCh, len(req.Tools) > 0)
+
+			stats.Get().DecrConcurrency()
+
+			if parseErr := <-parseErrCh; parseErr != nil {
+				log.Printf("[stream] parse error: %v", parseErr)
+			}
+
+			if hasContent {
+				// Save conversation in background
+				go client.SaveConversation(context.Background(), convID, query)
+				// Extract lastMsgID from events for context chaining
+				// (convStore parentID is managed by streamWebToOpenAIWithThinking)
+				release()
+				return
+			}
+
+			release()
+			log.Printf("[retry] empty response from account, will retry")
+			// Empty response: delete conversation state to get fresh context on retry
+			h.convStore.Delete(key)
 		} else {
-			writeError(w, http.StatusBadGateway, "all accounts returned empty response, please try again later")
+			// Non-streaming: collect all content then respond
+			respBody, err := io.ReadAll(body)
+			body.Close()
+			stats.Get().DecrConcurrency()
+			if err != nil {
+				release()
+				if attempt == maxRetries {
+					writeError(w, http.StatusBadGateway, fmt.Sprintf("read response: %v", err))
+					return
+				}
+				continue
+			}
+
+			content, errMsg := extractTextFromSSE(string(respBody))
+			content = filterThinkingContent(content)
+
+			if content != "" {
+				h.writeNonStreamResponse(w, model, content, len(req.Tools) > 0)
+				go client.SaveConversation(context.Background(), convID, query)
+				release()
+				return
+			}
+
+			if errMsg != "" {
+				log.Printf("[sse] attempt=%d got error from MiMo: %s, resetting conversation", attempt, errMsg)
+				h.convStore.Delete(key)
+			}
+
+			release()
+			log.Printf("[retry] empty response from account, will retry")
 		}
+	}
+
+	// All retries failed
+	if stream {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			flusher = &noopFlusher{}
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.WriteHeader(http.StatusOK)
+		finishChunk := adapter.MakeOpenAIStreamChunk(model, "", true)
+		fmt.Fprintf(w, "data: %s\n\n", finishChunk)
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	} else {
+		writeError(w, http.StatusBadGateway, "all accounts returned empty response, please try again later")
 	}
 }
 
@@ -670,6 +625,118 @@ func handleChatError(p *pool.Pool, client *mimo.WebClient, err error) {
 		p.MarkCooldown(client)
 		p.MarkUnhealthy(client)
 	}
+}
+
+// noopFlusher is used when http.ResponseWriter doesn't support Flusher
+type noopFlusher struct{}
+
+func (f *noopFlusher) Flush() {}
+
+// streamWebToOpenAIWithThinking forwards MiMo SSE events to OpenAI SSE format in real-time.
+// Thinking content (wrapped in <think...> tags) is sent as reasoning_content.
+// Returns true if any content was sent.
+func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model string, events <-chan mimo.WebSSEEvent, hasTools bool) bool {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		flusher = &noopFlusher{}
+	}
+
+	var hasContent bool
+	var totalContentLen int
+	var totalThinkingLen int
+	var lastMsgID string
+
+	// Regex to detect thinking tags
+	thinkStartRe := regexp.MustCompile(`(?s)^<think(?:\s[^>]*)?>`)
+	thinkEndRe := regexp.MustCompile(`(?s)</think\s*>$`)
+	inThinking := false
+
+	for event := range events {
+		if event.Data == "" {
+			continue
+		}
+
+		// Track lastMsgID for conversation chaining
+		if event.ID != "" {
+			lastMsgID = event.ID
+		}
+
+		// Check if this is a thinking block
+		if thinkStartRe.MatchString(event.Data) {
+			inThinking = true
+			// Strip the <think...> tag
+			cleaned := thinkStartRe.ReplaceAllString(event.Data, "")
+			if cleaned != "" {
+				chunk := adapter.MakeOpenAIStreamThinkingChunk(model, cleaned)
+				fmt.Fprintf(w, "data: %s\n\n", chunk)
+				flusher.Flush()
+				totalThinkingLen += len(cleaned)
+				hasContent = true
+			}
+			continue
+		}
+
+		if thinkEndRe.MatchString(event.Data) {
+			// Strip the </think...> tag
+			cleaned := thinkEndRe.ReplaceAllString(event.Data, "")
+			if cleaned != "" {
+				chunk := adapter.MakeOpenAIStreamThinkingChunk(model, cleaned)
+				fmt.Fprintf(w, "data: %s\n\n", chunk)
+				flusher.Flush()
+				totalThinkingLen += len(cleaned)
+				hasContent = true
+			}
+			inThinking = false
+			continue
+		}
+
+		if inThinking {
+			chunk := adapter.MakeOpenAIStreamThinkingChunk(model, event.Data)
+			fmt.Fprintf(w, "data: %s\n\n", chunk)
+			flusher.Flush()
+			totalThinkingLen += len(event.Data)
+			hasContent = true
+			continue
+		}
+
+		// Regular content - send as normal OpenAI chunk
+		// Filter out any remaining thinking tags
+		content := filterThinkingContent(event.Data)
+		if content == "" {
+			continue
+		}
+
+		// Check for tool calls in content
+		if hasTools && toolcall.HasToolCallSyntax(content) {
+			// Accumulate tool call content and parse when complete
+			chunk := adapter.MakeOpenAIStreamChunk(model, content, false)
+			fmt.Fprintf(w, "data: %s\n\n", chunk)
+			flusher.Flush()
+			totalContentLen += len(content)
+			hasContent = true
+			continue
+		}
+
+		chunk := adapter.MakeOpenAIStreamChunk(model, content, false)
+		fmt.Fprintf(w, "data: %s\n\n", chunk)
+		flusher.Flush()
+		totalContentLen += len(content)
+		hasContent = true
+	}
+
+	// Send finish chunk
+	finishChunk := adapter.MakeOpenAIStreamChunk(model, "", true)
+	fmt.Fprintf(w, "data: %s\n\n", finishChunk)
+	fmt.Fprintf(w, "data: [DONE]\n\n")
+	flusher.Flush()
+
+	// Record stats
+	completionTokens := estimateTokens(fmt.Sprintf("%d", totalContentLen)) + estimateTokens(fmt.Sprintf("%d", totalThinkingLen))
+	stats.Get().Record(model, 0, completionTokens, 0, totalThinkingLen, completionTokens)
+
+	log.Printf("[stream] done: contentLen=%d thinkingLen=%d lastMsgID=%s", totalContentLen, totalThinkingLen, lastMsgID)
+
+	return hasContent
 }
 
 func ModelsHandler(w http.ResponseWriter, r *http.Request) {

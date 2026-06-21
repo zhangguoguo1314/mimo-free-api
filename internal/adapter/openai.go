@@ -85,9 +85,10 @@ type OpenAIChoice struct {
 
 // OpenAIDelta 是流式增量
 type OpenAIDelta struct {
-	Role      string           `json:"role,omitempty"`
-	Content   string           `json:"content,omitempty"`
-	ToolCalls []OpenAIToolCall `json:"tool_calls,omitempty"`
+	Role             string           `json:"role,omitempty"`
+	Content          string           `json:"content,omitempty"`
+	ReasoningContent string           `json:"reasoning_content,omitempty"`
+	ToolCalls        []OpenAIToolCall `json:"tool_calls,omitempty"`
 }
 
 // OpenAIUsage 是 token 使用量
@@ -127,6 +128,28 @@ func MakeOpenAIStreamChunk(model, content string, finish bool) []byte {
 		chunk.Choices[0].FinishReason = &fr
 	} else {
 		chunk.Choices[0].Delta.Content = content
+	}
+
+	data, _ := json.Marshal(chunk)
+	return data
+}
+
+// MakeOpenAIStreamThinkingChunk creates a streaming chunk with reasoning_content (thinking)
+func MakeOpenAIStreamThinkingChunk(model, reasoning string) []byte {
+	now := time.Now().Unix()
+	chunk := OpenAIStreamChunk{
+		ID:      fmt.Sprintf("chatcmpl-%s", uuid.New().String()[:8]),
+		Object:  "chat.completion.chunk",
+		Created: now,
+		Model:   model,
+		Choices: []OpenAIChoice{
+			{
+				Index: 0,
+				Delta: &OpenAIDelta{
+					ReasoningContent: reasoning,
+				},
+			},
+		},
 	}
 
 	data, _ := json.Marshal(chunk)
