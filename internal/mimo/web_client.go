@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/md5"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -71,7 +73,8 @@ type ModelConfig struct {
 // Chat 发起聊天，返回 SSE 流
 // conversationID: 客户端提供的对话 ID，用于复用 MiMo 对话
 // parentID: 上一条 AI 回复的消息 ID，用于维持上下文链
-func (c *WebClient) Chat(ctx context.Context, query, model, conversationID, parentID string, thinking bool) (io.ReadCloser, error) {
+// multiMedias: 多媒体文件列表（图片等），可为nil
+func (c *WebClient) Chat(ctx context.Context, query, model, conversationID, parentID string, thinking bool, multiMedias []MultiMedia) (io.ReadCloser, error) {
 	if conversationID == "" {
 		conversationID = uuid.New().String()
 	}
@@ -87,7 +90,7 @@ func (c *WebClient) Chat(ctx context.Context, query, model, conversationID, pare
 			WebSearchStatus: "disabled",
 			Model:           model,
 		},
-		MultiMedias: []interface{}{},
+		MultiMedias:    multiMediasSlice(multiMedias),
 	}
 
 	body, err := json.Marshal(reqBody)
@@ -188,6 +191,192 @@ func ParseWebSSE(ctx context.Context, reader io.ReadCloser, events chan<- WebSSE
 	}
 	log.Printf("[ParseWebSSE] parsed %d events", eventCount)
 	return nil
+}
+
+// MultiMedia represents a media file in MiMo's chat request
+type MultiMedia struct {
+	MediaType string `json:"mediaType"`
+	Name      string `json:"name"`
+	Size      int64  `json:"size"`
+	URL       string `json:"url,omitempty"`
+	FileURL   string `json:"fileUrl,omitempty"`
+	Status    string `json:"status,omitempty"`
+}
+
+func multiMediasSlice(medias []MultiMedia) []interface{} {
+	if len(medias) == 0 {
+		return []interface{}{}
+	}
+	result := make([]interface{}, len(medias))
+	for i, m := range medias {
+		result[i] = m
+	}
+	return result
+}
+
+// UploadInfoResponse is the response from genUploadInfo
+type UploadInfoResponse struct {
+	UploadURL   string `json:"uploadUrl"`
+	ResourceURL string `json:"resourceUrl"`
+	ObjectName  string `json:"objectName"`
+}
+
+// UploadMedia uploads a media file to MiMo's storage and returns the resource URL.
+// Steps: 1) genUploadInfo 2) PUT upload 3) return resourceUrl
+func (c *WebClient) UploadMedia(ctx context.Context, data []byte, fileName, mediaType string) (*MultiMedia, error) {
+	// Step 1: Get upload URL
+	hash := md5.Sum(data)
+	hashStr := fmt.Sprintf("%x", hash)
+
+	uploadReq := map[string]string{
+		"fileName":     fileName,
+		"fileContentMd5": hashStr,
+	}
+	uploadBody, _ := json.Marshal(uploadReq)
+
+	encodedPh := url.QueryEscape(c.ph)
+	genURL := fmt.Sprintf("%s/open-apis/resource/genUploadInfo?xiaomichatbot_ph=%s", webBaseURL, encodedPh)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", genURL, bytes.NewReader(uploadBody))
+	if err != nil {
+		return nil, fmt.Errorf("genUploadInfo request: %w", err)
+	}
+	c.setCommonHeaders(httpReq)
+
+	genResp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("genUploadInfo: %w", err)
+	}
+	defer genResp.Body.Close()
+
+	if genResp.StatusCode != http.StatusOK {
+		errBody, _ := io.ReadAll(genResp.Body)
+		return nil, fmt.Errorf("genUploadInfo status %d: %s", genResp.StatusCode, string(errBody))
+	}
+
+	var uploadInfo UploadInfoResponse
+	if err := json.NewDecoder(genResp.Body).Decode(&uploadInfo); err != nil {
+		return nil, fmt.Errorf("genUploadInfo decode: %w", err)
+	}
+
+	if uploadInfo.UploadURL == "" {
+		return nil, fmt.Errorf("genUploadInfo: empty uploadUrl")
+	}
+
+	log.Printf("[upload] got upload URL for %s: objectName=%s", fileName, uploadInfo.ObjectName)
+
+	// Step 2: PUT upload the file
+	putReq, err := http.NewRequestWithContext(ctx, "PUT", uploadInfo.UploadURL, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("upload put request: %w", err)
+	}
+	putReq.Header.Set("Content-Type", "application/octet-stream")
+	putReq.Header.Set("Content-MD5", hashStr)
+
+	putResp, err := c.httpClient.Do(putReq)
+	if err != nil {
+		return nil, fmt.Errorf("upload put: %w", err)
+	}
+	defer putResp.Body.Close()
+	io.Copy(io.Discard, putResp.Body)
+
+	if putResp.StatusCode != http.StatusOK && putResp.StatusCode != http.StatusNoContent {
+		return nil, fmt.Errorf("upload put status %d", putResp.StatusCode)
+	}
+
+	log.Printf("[upload] uploaded %s (%d bytes) -> %s", fileName, len(data), uploadInfo.ResourceURL)
+
+	// Step 3: Return MultiMedia with the resource URL
+	return &MultiMedia{
+		MediaType: mediaType,
+		Name:      fileName,
+		Size:      int64(len(data)),
+		URL:       uploadInfo.ResourceURL,
+		FileURL:   uploadInfo.ResourceURL,
+		Status:    "completed",
+	}, nil
+}
+
+// setCommonHeaders sets the common headers for MiMo API requests
+func (c *WebClient) setCommonHeaders(req *http.Request) {
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", webBaseURL)
+	req.Header.Set("Referer", webBaseURL+"/")
+	req.Header.Set("x-timezone", "Asia/Shanghai")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+	req.Header.Set("sec-ch-ua", "\"Not/A)Brand\";v=\"8\", \"Chromium\";v=\"126\", \"Google Chrome\";v=\"126\"")
+	req.Header.Set("sec-ch-ua-mobile", "?0")
+	req.Header.Set("sec-ch-ua-platform", "\"Windows\"")
+	req.Header.Set("Cookie", fmt.Sprintf(
+		"userId=%s; serviceToken=%s; xiaomichatbot_ph=%s",
+		c.userID, c.serviceToken, c.ph,
+	))
+}
+
+// ParseDataURI extracts the media type and base64 data from a data URI.
+// Returns ("image/png", base64data, filename, error)
+func ParseDataURI(dataURI string) (string, []byte, string, error) {
+	if !strings.HasPrefix(dataURI, "data:") {
+		return "", nil, "", fmt.Errorf("not a data URI")
+	}
+
+	// data:image/png;base64,iVBOR...
+	parts := strings.SplitN(dataURI[5:], ",", 2)
+	if len(parts) != 2 {
+		return "", nil, "", fmt.Errorf("invalid data URI format")
+	}
+
+	meta := parts[0] // e.g., "image/png;base64"
+	b64Data := parts[1]
+
+	// Extract media type and check for base64 encoding
+	var mediaType string
+	isBase64 := false
+	for _, part := range strings.Split(meta, ";") {
+		part = strings.TrimSpace(part)
+		if part == "base64" {
+			isBase64 = true
+		} else if strings.Contains(part, "/") {
+			mediaType = part
+		}
+	}
+
+	if !isBase64 {
+		return "", nil, "", fmt.Errorf("data URI is not base64 encoded")
+	}
+
+	data, err := base64.StdEncoding.DecodeString(b64Data)
+	if err != nil {
+		// Try raw encoding
+		data, err = base64.RawStdEncoding.DecodeString(b64Data)
+		if err != nil {
+			return "", nil, "", fmt.Errorf("base64 decode: %w", err)
+		}
+	}
+
+	// Generate filename from media type
+	ext := "bin"
+	switch mediaType {
+	case "image/jpeg", "image/jpg":
+		ext = "jpg"
+	case "image/png":
+		ext = "png"
+	case "image/gif":
+		ext = "gif"
+	case "image/webp":
+		ext = "webp"
+	case "image/svg+xml":
+		ext = "svg"
+	case "application/pdf":
+		ext = "pdf"
+	case "audio/mpeg", "audio/mp3":
+		ext = "mp3"
+	case "video/mp4":
+		ext = "mp4"
+	}
+	fileName := fmt.Sprintf("upload_%d.%s", time.Now().UnixNano(), ext)
+
+	return mediaType, data, fileName, nil
 }
 
 // SaveConversation 保存对话到 MiMo 官网（维持服务端上下文的关键）
