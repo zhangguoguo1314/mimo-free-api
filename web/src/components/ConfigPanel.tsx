@@ -21,6 +21,7 @@ interface ModelTestResult {
 }
 
 function getAccountStatusColor(s: PoolStatus): string {
+  if (!s.enabled) return 'bg-gray-400'
   if (!s.healthy) return 'bg-red-500'
   if (s.cooldown_remaining > 0) return 'bg-amber-400'
   if (s.active > 0) return 'bg-blue-500'
@@ -103,9 +104,11 @@ export function ConfigPanel() {
   }, [])
 
   const totalAccounts = poolStatus.length
-  const healthyAccounts = poolStatus.filter(s => s.healthy && s.cooldown_remaining <= 0).length
-  const cooldownAccounts = poolStatus.filter(s => s.cooldown_remaining > 0).length
-  const unhealthyAccounts = poolStatus.filter(s => !s.healthy).length
+  const enabledAccounts = poolStatus.filter(s => s.enabled).length
+  const healthyAccounts = poolStatus.filter(s => s.enabled && s.healthy && s.cooldown_remaining <= 0).length
+  const cooldownAccounts = poolStatus.filter(s => s.enabled && s.cooldown_remaining > 0).length
+  const unhealthyAccounts = poolStatus.filter(s => s.enabled && !s.healthy).length
+  const disabledAccounts = poolStatus.filter(s => !s.enabled).length
 
   const handleSave = async () => {
     setSaving(true)
@@ -467,7 +470,7 @@ export function ConfigPanel() {
           </h2>
           <div className="flex items-center gap-2">
             <span className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-              {accounts.filter(a => a.active).length}/{accounts.length} active
+              {enabledAccounts}/{totalAccounts} {lang === 'zh' ? '启用' : 'active'}
             </span>
             {/* 全量测试 */}
             <motion.button onClick={handlePoolTest} disabled={poolTesting}
@@ -514,7 +517,7 @@ export function ConfigPanel() {
         {poolStatus.length > 0 && (
           <div className={`p-4 rounded-xl border ${isDark ? 'bg-white/[0.02] border-white/[0.08]' : 'bg-gray-50/80 border-gray-200'}`}>
             {/* Summary stats */}
-            <div className="grid grid-cols-4 gap-3 mb-4">
+            <div className="grid grid-cols-5 gap-3 mb-4">
               <div className={`p-3 rounded-lg ${isDark ? 'bg-white/[0.04]' : 'bg-white'} border ${isDark ? 'border-white/[0.06]' : 'border-gray-100'}`}>
                 <div className="flex items-center gap-2 mb-1">
                   <Activity className={`w-3.5 h-3.5 ${isDark ? 'text-blue-400' : 'text-blue-500'}`} />
@@ -543,6 +546,13 @@ export function ConfigPanel() {
                 </div>
                 <p className={`text-lg font-bold ${isDark ? 'text-white' : 'text-gray-800'}`}>{unhealthyAccounts}</p>
               </div>
+              <div className={`p-3 rounded-lg ${isDark ? 'bg-white/[0.04]' : 'bg-white'} border ${isDark ? 'border-white/[0.06]' : 'border-gray-100'}`}>
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="w-2.5 h-2.5 rounded-full bg-gray-400" />
+                  <span className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{lang === 'zh' ? '禁用' : 'Disabled'}</span>
+                </div>
+                <p className={`text-lg font-bold ${isDark ? 'text-white' : 'text-gray-800'}`}>{disabledAccounts}</p>
+              </div>
             </div>
 
             {/* Status grid */}
@@ -552,7 +562,7 @@ export function ConfigPanel() {
                 return (
                   <motion.div
                     key={s.id}
-                    className={`p-2.5 rounded-lg border ${isDark ? 'border-white/[0.06] bg-white/[0.02]' : 'border-gray-100 bg-white'} hover:shadow-sm transition-shadow`}
+                    className={`p-2.5 rounded-lg border ${isDark ? 'border-white/[0.06] bg-white/[0.02]' : 'border-gray-100 bg-white'} hover:shadow-sm transition-shadow ${!s.enabled ? 'opacity-50' : ''}`}
                     whileHover={{ scale: 1.02 }}
                   >
                     <div className="flex items-center gap-2 mb-1.5">
