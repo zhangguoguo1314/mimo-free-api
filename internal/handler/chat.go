@@ -1586,9 +1586,18 @@ func extractMediaFromMessages(msgs []adapter.OpenAIMessage) []pendingMedia {
 					log.Printf("[media] failed to parse data URI: %v", err)
 					continue
 				}
+				// Map MIME type to MiMo's MediaTypeEnum: image, file, audio, video, media
+				mimoType := "image"
+				if strings.HasPrefix(mediaType, "video/") {
+					mimoType = "video"
+				} else if strings.HasPrefix(mediaType, "audio/") {
+					mimoType = "audio"
+				} else if mediaType == "application/pdf" {
+					mimoType = "file"
+				}
 				media = append(media, pendingMedia{
 					Data:      data,
-					MediaType: mediaType,
+					MediaType: mimoType,
 					FileName:  fileName,
 				})
 			} else if strings.HasPrefix(rawURL, "http://") || strings.HasPrefix(rawURL, "https://") {
