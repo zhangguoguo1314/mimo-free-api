@@ -198,12 +198,16 @@ func ParseWebSSE(ctx context.Context, reader io.ReadCloser, events chan<- WebSSE
 
 // MultiMedia represents a media file in MiMo's chat request
 type MultiMedia struct {
-	MediaType string `json:"mediaType"`
-	Name      string `json:"name"`
-	Size      int64  `json:"size"`
-	URL       string `json:"url,omitempty"`
-	FileURL   string `json:"fileUrl,omitempty"`
-	Status    string `json:"status,omitempty"`
+	MediaType           string `json:"mediaType"`
+	Name                string `json:"name"`
+	Size                int64  `json:"size"`
+	URL                 string `json:"url,omitempty"`
+	FileURL             string `json:"fileUrl,omitempty"`
+	CompressedVideoURL  string `json:"compressedVideoUrl,omitempty"`
+	AudioTrackURL       string `json:"audioTrackUrl,omitempty"`
+	ObjectName          string `json:"objectName,omitempty"`
+	TokenUsage          int    `json:"tokenUsage,omitempty"`
+	Status              string `json:"status,omitempty"`
 }
 
 func multiMediasSlice(medias []MultiMedia) []interface{} {
@@ -237,7 +241,8 @@ type ParseResponse struct {
 	Code int `json:"code"`
 	Msg  string `json:"msg"`
 	Data struct {
-		ID string `json:"id"`
+		ID         string `json:"id"`
+		TokenUsage int    `json:"tokenUsage"`
 	} `json:"data"`
 }
 
@@ -276,7 +281,7 @@ func (c *WebClient) UploadMedia(ctx context.Context, data []byte, fileName, medi
 
 	// Read full response body for debugging
 	genBody, _ := io.ReadAll(genResp.Body)
-	log.Printf("[upload] genUploadInfo response: %s", string(genBody))
+	log.Printf("[upload] genUploadInfo response: %s", string(genBody[:min(len(genBody), 200)]))
 
 	var uploadInfo UploadInfoResponse
 	if err := json.Unmarshal(genBody, &uploadInfo); err != nil {
@@ -319,6 +324,10 @@ func (c *WebClient) UploadMedia(ctx context.Context, data []byte, fileName, medi
 		url.QueryEscape(c.ph))
 
 	var resourceID string
+	var lastParseData struct {
+		ID         string `json:"id"`
+		TokenUsage int    `json:"tokenUsage"`
+	}
 	for retry := 0; retry < 3; retry++ {
 		parseReq, err := http.NewRequestWithContext(ctx, "POST", parseURL, bytes.NewReader([]byte("{}")))
 		if err != nil {
@@ -351,6 +360,7 @@ func (c *WebClient) UploadMedia(ctx context.Context, data []byte, fileName, medi
 
 		if parseResult.Data.ID != "" {
 			resourceID = parseResult.Data.ID
+			lastParseData = parseResult.Data
 			log.Printf("[upload] parse success: resourceId=%s", resourceID)
 			break
 		}
@@ -367,13 +377,22 @@ func (c *WebClient) UploadMedia(ctx context.Context, data []byte, fileName, medi
 	// Step 4: Return MultiMedia with correct fields
 	// CRITICAL: url field = resourceId (from parse), NOT resourceUrl
 	// fileUrl field = resourceUrl (the actual file URL)
+	tokenUsage := 106 // Default token usage for images
+	if lastParseData.ID != "" && lastParseData.TokenUsage > 0 {
+		tokenUsage = lastParseData.TokenUsage
+	}
+	
 	return &MultiMedia{
-		MediaType: mediaType,
-		Name:      fileName,
-		Size:      int64(len(data)),
-		URL:       resourceID,
-		FileURL:   uploadInfo.Data.ResourceURL,
-		Status:    "completed",
+		MediaType:          mediaType,
+		Name:               fileName,
+		Size:               int64(len(data)),
+		URL:                resourceID,
+		FileURL:            uploadInfo.Data.ResourceURL,
+		CompressedVideoURL: "",
+		AudioTrackURL:      "",
+		ObjectName:         uploadInfo.Data.ObjectName,
+		TokenUsage:         tokenUsage,
+		Status:             "completed",
 	}, nil
 }
 
