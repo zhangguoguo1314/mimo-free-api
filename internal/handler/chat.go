@@ -1349,18 +1349,23 @@ func extractContentString(content interface{}) string {
 	return ""
 }
 
-// buildConversationQuery constructs a query string from the full conversation history.
-// This ensures context is preserved even when switching accounts.
-// Format: each message is prefixed with "user: " or "assistant: ".
-// Only the last user message is the actual query; previous messages provide context.
 // buildConversationQuery builds the query string for MiMo from OpenAI messages.
-// Uses a sliding window strategy to avoid "text too long" errors:
-//   - Takes the last N rounds of conversation (up to maxQueryChars)
-//   - MiMo maintains full server-side context via conversationId + parentId
-//   - The sliding window provides fallback context when switching accounts
+//
+// Strategy: MiMo maintains server-side context via conversationId + parentId.
+// So in normal operation, we only need to send the latest user message.
+// Historical messages are included ONLY as formatted context (wrapped in
+// markers) so MiMo can distinguish history from the current query.
+//
+// This prevents two problems:
+//   1. "text too long" - we don't send all history every time
+//   2. "garbled replies" - MiMo knows which part is history vs current
+//
+// When switching accounts (new conversationId), the formatted history
+// provides fallback context so the conversation isn't completely lost.
 const (
-	maxQueryRounds  = 3  // max conversation rounds to include (1 round = user + assistant)
-	maxQueryChars   = 4000 // max total query length in characters
+	maxQueryRounds       = 3     // max historical rounds to include (1 round = user + assistant)
+	maxQueryChars        = 4000  // max total query length in characters
+	maxHistoryChars       = 3000  // max chars for the history section
 )
 
 func buildConversationQuery(msgs []adapter.OpenAIMessage) string {
@@ -1400,55 +1405,52 @@ func buildConversationQuery(msgs []adapter.OpenAIMessage) string {
 		return ""
 	}
 
-	// Step 2: Build from the tail, collecting up to maxQueryRounds rounds (user+assistant pairs)
-	// Always include the latest message even if it exceeds the round limit.
-	var parts []string
-	roundCount := 0
-	for i := len(valid) - 1; i >= 0; i-- {
-		entry := valid[i]
-		prefix := entry.role + ": "
-		part := prefix + entry.content + "\n"
+	// Step 2: Separate the latest message (current query) from history
+	latest := valid[len(valid)-1]
+	history := valid[:len(valid)-1]
 
-		// Count rounds: a "user" message that is NOT the last message starts a new round
-		if entry.role == "user" && i < len(valid)-1 {
+	// Step 3: Build history section (sliding window from tail, up to maxQueryRounds)
+	var historyParts []string
+	roundCount := 0
+	for i := len(history) - 1; i >= 0; i-- {
+		entry := history[i]
+		part := entry.role + ": " + entry.content + "\n"
+
+		// Count rounds: each user message starts a new round
+		if entry.role == "user" {
 			roundCount++
 			if roundCount > maxQueryRounds {
 				break
 			}
 		}
 
-		parts = append(parts, part)
+		historyParts = append(historyParts, part)
 	}
 
-	// Step 3: Reverse to get correct order and check total length
-	var sb strings.Builder
-	totalLen := 0
-	for i := len(parts) - 1; i >= 0; i-- {
-		totalLen += len(parts[i])
-		if totalLen > maxQueryChars {
-			// If adding this part would exceed the limit, skip it
-			// (but always keep at least the latest message)
-			if i == len(parts)-1 {
-				// Latest message is too long, truncate it
-				remaining := maxQueryChars - sb.Len()
-				if remaining > 0 {
-					// Find the content portion (after "user: " or "assistant: ")
-					text := parts[i]
-					prefixLen := strings.IndexByte(text, ' ') + 1
-					if prefixLen > len(text) {
-						prefixLen = len(text)
-					}
-					sb.WriteString(text[:prefixLen])
-					sb.WriteString(text[prefixLen+1 : prefixLen+1+min(remaining-prefixLen, len(text)-prefixLen-1)])
-					sb.WriteString("\n")
-				}
-			}
-			continue
+	// Reverse to get correct chronological order
+	var historyBuilder strings.Builder
+	historyLen := 0
+	for i := len(historyParts) - 1; i >= 0; i-- {
+		if historyLen + len(historyParts[i]) > maxHistoryChars {
+			continue // skip oldest if too long
 		}
-		sb.WriteString(parts[i])
+		historyBuilder.WriteString(historyParts[i])
+		historyLen += len(historyParts[i])
 	}
 
-	return sb.String()
+	// Step 4: Assemble final query
+	var result strings.Builder
+
+	if historyBuilder.Len() > 0 {
+		result.WriteString("[以下是对话历史记录，仅供参考，不需要回复这些内容]\n")
+		result.WriteString(historyBuilder.String())
+		result.WriteString("[对话历史结束]\n\n")
+	}
+
+	// Latest message is the actual query (no prefix needed)
+	result.WriteString(latest.content)
+
+	return result.String()
 }
 
 // extractFirstOpenAIUserMessage extracts the first user message from OpenAI messages.
