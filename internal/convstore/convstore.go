@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"sync"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // Store manages conversationId → parentId mappings for MiMo conversation reuse.
@@ -54,15 +52,15 @@ func DeriveKey(firstUserMsg, model string) string {
 }
 
 // GetOrCreate returns the conversationId and parentId for a conversation.
-// If no conversation exists for this key, creates a new one with a random UUID.
+// If no conversation exists for this key, creates a new one with a random 32-char hex ID.
 func (s *Store) GetOrCreate(key string) (convID, parentID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if cs, ok := s.convs[key]; ok {
 		return cs.ConvID, cs.ParentID
 	}
-	// New conversation: use standard UUID format (with hyphens) to match MiMo expectations
-	newConvID := uuid.New().String()
+	// New conversation: use 32-char hex (no hyphens) to match MiMo's format
+	newConvID := randomHex32()
 	s.convs[key] = &convState{ConvID: newConvID, ParentID: "0", AcctIdx: -1}
 	return newConvID, "0"
 }

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -1581,7 +1582,7 @@ func (h *ChatHandler) maybeGenerateSummary(ctx context.Context, key string, clie
 		}
 
 		// Use a fresh conversationId for summary (don't pollute the main conversation)
-		summaryConvID := uuid.New().String()
+		summaryConvID := fmt.Sprintf("%x", sha256.Sum256([]byte("summary-"+key)))[:32]
 		summaryResp, err := client.Chat(context.Background(), sb.String(), "mimo-v2.5-pro", summaryConvID, "0", false, nil)
 		if err != nil {
 			log.Printf("[summary] failed to generate: %v", err)
