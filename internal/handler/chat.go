@@ -224,6 +224,28 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 
 		convID, parentID := h.convStore.GetOrCreate(key)
 
+		// ---- Account switch recovery ----
+		// If this conversation was previously bound to a different account,
+		// we need to inject summary + recent messages as system context
+		// because the new account doesn't have the old conversationId.
+		if h.convStore.IsAccountSwitched(key, clientIdx) {
+			log.Printf("[recovery] account switched for conv %s, injecting context", key[:8])
+			summary, recentMsgs := h.convStore.GetRecoveryContext(key, 6) // last 6 messages
+			recoveryParts := buildRecoveryQuery(summary, recentMsgs)
+			if recoveryParts != "" {
+				query = recoveryParts + "\n\n" + query
+				log.Printf("[recovery] injected %d chars of context", len(recoveryParts))
+			}
+			// Reset parentID to start a new conversation chain on the new account
+			parentID = "0"
+		}
+
+		// Store current user message for future recovery
+		lastUserMsg := extractLastUserMessage(req.Messages)
+		if lastUserMsg != "" {
+			h.convStore.AddMessage(key, "user", lastUserMsg)
+		}
+
 		// Upload media files if any (must be done after acquiring client for auth)
 		if len(mediaList) > 0 && multiMedias == nil {
 			log.Printf("[media] uploading %d media files...", len(mediaList))
@@ -1347,6 +1369,41 @@ func extractContentString(content interface{}) string {
 		return buf.String()
 	}
 	return ""
+}
+
+// extractLastUserMessage extracts the content of the last user message.
+func extractLastUserMessage(msgs []adapter.OpenAIMessage) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "user" {
+			return extractContentString(msgs[i].Content)
+		}
+	}
+	return ""
+}
+
+// buildRecoveryQuery builds a recovery context string from summary and recent messages.
+// Used when switching accounts to provide fallback context.
+func buildRecoveryQuery(summary string, recentMsgs []convstore.MsgEntry) string {
+	var sb strings.Builder
+
+	if summary != "" {
+		sb.WriteString("[对话摘要]\n")
+		sb.WriteString(summary)
+		sb.WriteString("\n[摘要结束]\n\n")
+	}
+
+	if len(recentMsgs) > 0 {
+		sb.WriteString("[最近对话记录]\n")
+		for _, msg := range recentMsgs {
+			sb.WriteString(msg.Role)
+			sb.WriteString(": ")
+			sb.WriteString(msg.Content)
+			sb.WriteString("\n")
+		}
+		sb.WriteString("[记录结束]\n")
+	}
+
+	return sb.String()
 }
 
 // buildConversationQuery builds the query string for MiMo from OpenAI messages.
