@@ -32,12 +32,22 @@ func main() {
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		// Fallback: try /data/config.json (HF Space persistent storage)
+		if configPath != "/data/config.json" {
+			cfg, err = config.Load("/data/config.json")
+		}
+		if err != nil {
+			log.Fatalf("Failed to load config (tried %s and /data/config.json): %v", configPath, err)
+		}
 	}
 
-	// 初始化统计追踪
-	stats.Init("data/stats.json")
-	stats.InitConvStore("data/conversations.json")
+	// 初始化统计追踪 (use /data for HF Space persistence)
+	dataDir := os.Getenv("DATA_DIR")
+	if dataDir == "" {
+		dataDir = "data"
+	}
+	stats.Init(dataDir + "/stats.json")
+	stats.InitConvStore(dataDir + "/conversations.json")
 
 	// 初始化账号池
 	poolCfg := pool.PoolConfig{
