@@ -1438,6 +1438,29 @@ func truncateContent(content string, maxChars int) string {
 	return content[:maxChars-3] + "..."
 }
 
+// containsCJK checks if a string contains CJK (Chinese/Japanese/Korean) characters.
+// Used to avoid filtering long Chinese text that doesn't contain ASCII spaces.
+func containsCJK(s string) bool {
+	for _, r := range s {
+		if r >= 0x4E00 && r <= 0x9FFF { // CJK Unified Ideographs
+			return true
+		}
+		if r >= 0x3400 && r <= 0x4DBF { // CJK Extension A
+			return true
+		}
+		if r >= 0xF900 && r <= 0xFAFF { // CJK Compatibility Ideographs
+			return true
+		}
+		if r >= 0x3000 && r <= 0x303F { // CJK Symbols and Punctuation
+			return true
+		}
+		if r >= 0xFF00 && r <= 0xFFEF { // Fullwidth Forms
+			return true
+		}
+	}
+	return false
+}
+
 // buildConversationQuery builds the query string for MiMo from OpenAI messages.
 //
 // Strategy: MiMo maintains server-side context via conversationId + parentId.
@@ -1478,7 +1501,9 @@ func buildConversationQuery(msgs []adapter.OpenAIMessage) string {
 		if strings.HasPrefix(content, `{"id":"chatcmpl`) || strings.HasPrefix(content, `{"id":"chatcmp`) {
 			continue
 		}
-		if len(content) > 500 && !strings.Contains(content, " ") && !strings.Contains(content, "\n") {
+		// Skip very long single-line messages that look like encoded data (>500 chars, no spaces/newlines).
+		// But allow Chinese/CJK text which may not contain ASCII spaces.
+		if len(content) > 500 && !strings.Contains(content, " ") && !strings.Contains(content, "\n") && !containsCJK(content) {
 			continue
 		}
 		// Truncate long messages to prevent single message from blowing up the query
