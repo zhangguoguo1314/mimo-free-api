@@ -217,19 +217,14 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 		}
 		defer doRelease()
 
-		// Bind this conversation to the acquired account (if not already bound)
-		if boundIdx < 0 && clientIdx >= 0 {
-			h.convStore.SetAcctIdx(key, clientIdx)
-			log.Printf("[bind] conversation %s bound to account %d", key[:8], clientIdx)
-		}
-
 		convID, parentID := h.convStore.GetOrCreate(key)
 
-		// ---- Account switch recovery ----
+		// ---- Account switch detection & recovery ----
+		// Check BEFORE updating binding so IsAccountSwitched can detect the change.
 		// If this conversation was previously bound to a different account,
-		// we need to inject summary + recent messages as system context
-		// because the new account doesn't have the old conversationId.
-		if h.convStore.IsAccountSwitched(key, clientIdx) {
+		// inject summary + recent messages as context for the new account.
+		isSwitched := h.convStore.IsAccountSwitched(key, clientIdx)
+		if isSwitched {
 			log.Printf("[recovery] account switched for conv %s, injecting context", key[:8])
 			summary, recentMsgs := h.convStore.GetRecoveryContext(key, 6) // last 6 messages
 			recoveryParts := buildRecoveryQuery(summary, recentMsgs)
@@ -239,6 +234,19 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 			}
 			// Reset parentID to start a new conversation chain on the new account
 			parentID = "0"
+		}
+
+		// Update binding AFTER switch detection
+		if clientIdx >= 0 {
+			oldIdx := h.convStore.GetAcctIdx(key)
+			if oldIdx != clientIdx {
+				h.convStore.SetAcctIdx(key, clientIdx)
+				if oldIdx >= 0 {
+					log.Printf("[bind] conversation %s switched from account %d to %d", key[:8], oldIdx, clientIdx)
+				} else {
+					log.Printf("[bind] conversation %s bound to account %d", key[:8], clientIdx)
+				}
+			}
 		}
 
 		// Store current user message for future recovery
@@ -274,8 +282,8 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 			errMsg := err.Error()
 			if strings.Contains(strings.ToLower(errMsg), "too long") || strings.Contains(strings.ToLower(errMsg), "text you sent") {
 				log.Printf("[overflow] MiMo context overflow detected for conv %s, resetting conversation", key[:8])
-				// Delete old conversation state to force a new conversationId
-				h.convStore.Delete(key)
+				// Reset conversationId but preserve summary and message history
+				h.convStore.ResetConversation(key)
 				// The next retry will create a new conversationId with fresh context
 				// Account switch recovery will inject summary + recent messages
 				if attempt == maxRetries {
@@ -347,8 +355,8 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 
 			doRelease()
 			log.Printf("[retry] empty response from account, will retry")
-			// Empty response: delete conversation state to get fresh context on retry
-			h.convStore.Delete(key)
+			// Empty response: reset conversationId but preserve history for recovery
+			h.convStore.ResetConversation(key)
 		} else {
 			// Non-streaming: collect all content then respond
 			respBody, err := io.ReadAll(body)
@@ -379,7 +387,7 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 
 			if errMsg != "" {
 				log.Printf("[sse] attempt=%d got error from MiMo: %s, resetting conversation", attempt, errMsg)
-				h.convStore.Delete(key)
+				h.convStore.ResetConversation(key)
 			}
 
 			doRelease()
@@ -1552,7 +1560,7 @@ func range_msg(msgs []adapter.OpenAIMessage, i int) *adapter.OpenAIMessage {
 // Called after each successful response, runs in background.
 func (h *ChatHandler) maybeGenerateSummary(ctx context.Context, key string, client *mimo.WebClient) {
 	msgCount := h.convStore.GetMessageCount(key)
-	if msgCount < summaryInterval*2 {
+	if msgCount < 6 {
 		return // Not enough messages yet
 	}
 	if !h.convStore.NeedsSummary(key, summaryInterval) {

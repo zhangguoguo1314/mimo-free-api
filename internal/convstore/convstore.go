@@ -102,6 +102,18 @@ func (s *Store) UnbindAcct(key string) {
 	}
 }
 
+// ResetConversation resets the conversationId and parentId to start fresh,
+// but PRESERVES summary, message history, and account binding.
+// Used when MiMo returns empty response or context overflow.
+func (s *Store) ResetConversation(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cs, ok := s.convs[key]; ok {
+		cs.ConvID = randomHex32()
+		cs.ParentID = "0"
+	}
+}
+
 // Delete removes a conversation state, forcing a new conversation on next request.
 func (s *Store) Delete(key string) {
 	s.mu.Lock()
@@ -187,7 +199,7 @@ func (s *Store) NeedsSummary(key string, summaryInterval int) bool {
 	defer s.mu.RUnlock()
 	if cs, ok := s.convs[key]; ok {
 		if cs.Summary == "" {
-			return cs.MessageCount >= summaryInterval*2
+			return cs.MessageCount >= 6
 		}
 		// Need summaryInterval new messages since last summary
 		return cs.MessageCount-cs.SummaryAtMsgCount >= summaryInterval
