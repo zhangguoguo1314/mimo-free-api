@@ -1422,11 +1422,37 @@ func buildRecoveryQuery(summary string, recentMsgs []convstore.MsgEntry) string 
 const (
 	maxQueryRounds       = 3     // max historical rounds to include (1 round = user + assistant)
 	maxQueryChars        = 4000  // max total query length in characters
-	maxHistoryChars       = 3000  // max chars for the history section
+	maxHistoryChars      = 3000  // max chars for the history section
+	maxMsgCharsPerEntry  = 500   // max chars per single message (truncate if longer)
+	summaryInterval      = 10    // generate summary every N messages
 )
 
+// truncateContent truncates content to maxChars, adding "..." if truncated.
+func truncateContent(content string, maxChars int) string {
+	if len(content) <= maxChars {
+		return content
+	}
+	if maxChars <= 3 {
+		return content[:maxChars]
+	}
+	return content[:maxChars-3] + "..."
+}
+
+// buildConversationQuery builds the query string for MiMo from OpenAI messages.
+//
+// Strategy: MiMo maintains server-side context via conversationId + parentId.
+// So in normal operation, we only need to send the latest user message.
+// Historical messages are included ONLY as formatted context (wrapped in
+// markers) so MiMo can distinguish history from the current query.
+//
+// Key protections against "text too long":
+//   1. Single message truncation: each message max 500 chars
+//   2. Sliding window: only last 3 rounds of history
+//   3. History budget: max 3000 chars for history section
+//   4. Total budget: max 4000 chars for entire query
 func buildConversationQuery(msgs []adapter.OpenAIMessage) string {
 	// Step 1: Filter valid messages (skip system, auto-generated, encoded data, etc.)
+	// Also truncate each message to prevent single message from exceeding budget
 	type msgEntry struct {
 		role    string
 		content string
@@ -1455,6 +1481,8 @@ func buildConversationQuery(msgs []adapter.OpenAIMessage) string {
 		if len(content) > 500 && !strings.Contains(content, " ") && !strings.Contains(content, "\n") {
 			continue
 		}
+		// Truncate long messages to prevent single message from blowing up the query
+		content = truncateContent(content, maxMsgCharsPerEntry)
 		valid = append(valid, msgEntry{role: msg.Role, content: content})
 	}
 
