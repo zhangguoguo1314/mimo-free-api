@@ -268,6 +268,22 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 		if err != nil {
 			stats.Get().DecrConcurrency()
 			doRelease()
+
+			// Detect context overflow: "text too long" or similar errors
+			errMsg := err.Error()
+			if strings.Contains(strings.ToLower(errMsg), "too long") || strings.Contains(strings.ToLower(errMsg), "text you sent") {
+				log.Printf("[overflow] MiMo context overflow detected for conv %s, resetting conversation", key[:8])
+				// Delete old conversation state to force a new conversationId
+				h.convStore.Delete(key)
+				// The next retry will create a new conversationId with fresh context
+				// Account switch recovery will inject summary + recent messages
+				if attempt == maxRetries {
+					writeError(w, http.StatusBadGateway, "conversation too long, please start a new conversation")
+					return
+				}
+				continue
+			}
+
 			handleChatError(h.pool, client, err)
 			// Unbind from failed account so next retry picks a new one
 			h.convStore.UnbindAcct(key)
@@ -303,7 +319,7 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 			fmt.Fprintf(w, "data: %s\n\n", initChunk)
 			flusher.Flush()
 
-			hasContent, lastMsgID, _ := h.streamWebToOpenAIWithThinking(w, model, eventsCh, len(req.Tools) > 0)
+			hasContent, lastMsgID, streamedContent, _ := h.streamWebToOpenAIWithThinking(w, model, eventsCh, len(req.Tools) > 0)
 
 			stats.Get().DecrConcurrency()
 
@@ -316,6 +332,12 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 				if lastMsgID != "" {
 					h.convStore.SetParentID(key, lastMsgID)
 				}
+				// Store assistant response for future recovery
+				if streamedContent != "" {
+					h.convStore.AddMessage(key, "assistant", streamedContent)
+				}
+				// Check if we need to generate a summary
+				h.maybeGenerateSummary(ctx, key, client)
 				// Save conversation in background
 				go client.SaveConversation(context.Background(), convID, query)
 				doRelease()
@@ -345,6 +367,10 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 
 			if content != "" {
 				h.writeNonStreamResponse(w, model, content, len(req.Tools) > 0)
+				// Store assistant response for future recovery
+				h.convStore.AddMessage(key, "assistant", content)
+				// Check if we need to generate a summary
+				h.maybeGenerateSummary(ctx, key, client)
 				go client.SaveConversation(context.Background(), convID, query)
 				doRelease()
 				return
@@ -812,7 +838,7 @@ func handleChatError(p *pool.Pool, client *mimo.WebClient, err error) {
 // Text content may contain <think...>\x00...thinking...\x00</think...\x00actual response
 // Thinking content is sent as reasoning_content, actual response as content.
 // Returns (hasContent, lastMsgID, usage).
-func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model string, events <-chan mimo.WebSSEEvent, hasTools bool) (bool, string, adapter.OpenAIUsage) {
+func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model string, events <-chan mimo.WebSSEEvent, hasTools bool) (bool, string, string, adapter.OpenAIUsage) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		flusher = &noopFlusher{}
@@ -992,7 +1018,7 @@ func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model
 
 	log.Printf("[stream] done: contentLen=%d thinkingLen=%d lastMsgID=%s usage=%+v", totalContentLen, totalThinkingLen, lastMsgID, usage)
 
-	return hasContent, lastMsgID, usage
+	return hasContent, lastMsgID, contentBuf.String(), usage
 }
 
 func ModelsHandler(w http.ResponseWriter, r *http.Request) {
@@ -1419,12 +1445,12 @@ func buildRecoveryQuery(summary string, recentMsgs []convstore.MsgEntry) string 
 //
 // When switching accounts (new conversationId), the formatted history
 // provides fallback context so the conversation isn't completely lost.
+// Context management constants
 const (
-	maxQueryRounds       = 3     // max historical rounds to include (1 round = user + assistant)
-	maxQueryChars        = 4000  // max total query length in characters
-	maxHistoryChars      = 3000  // max chars for the history section
-	maxMsgCharsPerEntry  = 500   // max chars per single message (truncate if longer)
-	summaryInterval      = 10    // generate summary every N messages
+	maxMsgCharsPerEntry = 500   // max chars per single message (truncate if longer)
+	summaryInterval     = 12   // generate summary every N user messages
+	maxRecoveryRounds   = 5    // max rounds to include in recovery context
+	maxRecoveryChars    = 3000 // max chars for recovery context
 )
 
 // truncateContent truncates content to maxChars, adding "..." if truncated.
@@ -1461,37 +1487,38 @@ func containsCJK(s string) bool {
 	return false
 }
 
-// buildConversationQuery builds the query string for MiMo from OpenAI messages.
+// buildConversationQuery extracts the latest user message from OpenAI messages.
 //
-// Strategy: MiMo maintains server-side context via conversationId + parentId.
-// So in normal operation, we only need to send the latest user message.
-// Historical messages are included ONLY as formatted context (wrapped in
-// markers) so MiMo can distinguish history from the current query.
+// CRITICAL DESIGN DECISION:
+// MiMo maintains server-side context via conversationId + parentId chain.
+// We MUST NOT send historical messages in normal operation because:
+//   1. MiMo already remembers the full conversation on its server
+//   2. Sending history creates CONFLICT with MiMo's own memory → garbled replies
+//   3. History wastes query budget → triggers "text too long" faster
 //
-// Key protections against "text too long":
-//   1. Single message truncation: each message max 500 chars
-//   2. Sliding window: only last 3 rounds of history
-//   3. History budget: max 3000 chars for history section
-//   4. Total budget: max 4000 chars for entire query
+// History is ONLY injected in two cases:
+//   - Account switch (new conversationId, MiMo has no memory)
+//   - Context overflow (MiMo lost context, detected by error response)
+//
+// In those cases, buildRecoveryQuery() is used instead (see below).
 func buildConversationQuery(msgs []adapter.OpenAIMessage) string {
-	// Step 1: Filter valid messages (skip system, auto-generated, encoded data, etc.)
-	// Also truncate each message to prevent single message from exceeding budget
-	type msgEntry struct {
-		role    string
-		content string
-	}
-	var valid []msgEntry
-	for _, msg := range msgs {
-		if msg.Role == "system" {
+	// Walk messages from the end to find the last valid user message
+	for i := len(msgs) - 1; i >= 0; i-- {
+		msg := range_msg(msgs, i)
+		if msg == nil {
+			continue
+		}
+		if msg.Role != "user" {
 			continue
 		}
 		content := extractContentString(msg.Content)
 		if content == "" {
 			continue
 		}
-		if msg.Role == "user" && isAutoGeneratedQuery(content) {
+		if isAutoGeneratedQuery(content) {
 			continue
 		}
+		// Skip base64/encoded data
 		if strings.HasPrefix(content, "eyJ") && (strings.Contains(content, "chatcmpl") || strings.Contains(content, "chat.completion") || len(content) > 200) {
 			continue
 		}
@@ -1501,66 +1528,84 @@ func buildConversationQuery(msgs []adapter.OpenAIMessage) string {
 		if strings.HasPrefix(content, `{"id":"chatcmpl`) || strings.HasPrefix(content, `{"id":"chatcmp`) {
 			continue
 		}
-		// Skip very long single-line messages that look like encoded data (>500 chars, no spaces/newlines).
-		// But allow Chinese/CJK text which may not contain ASCII spaces.
 		if len(content) > 500 && !strings.Contains(content, " ") && !strings.Contains(content, "\n") && !containsCJK(content) {
 			continue
 		}
-		// Truncate long messages to prevent single message from blowing up the query
+		// Truncate if too long (prevents "text too long" for single message)
 		content = truncateContent(content, maxMsgCharsPerEntry)
-		valid = append(valid, msgEntry{role: msg.Role, content: content})
+		return content
+	}
+	return ""
+}
+
+// range_msg safely indexes into the message slice.
+func range_msg(msgs []adapter.OpenAIMessage, i int) *adapter.OpenAIMessage {
+	if i < 0 || i >= len(msgs) {
+		return nil
+	}
+	return &msgs[i]
+}
+
+// maybeGenerateSummary checks if the conversation needs a summary and generates one.
+// Summary is generated using MiMo itself (no external LLM dependency).
+// Called after each successful response, runs in background.
+func (h *ChatHandler) maybeGenerateSummary(ctx context.Context, key string, client *mimo.WebClient) {
+	msgCount := h.convStore.GetMessageCount(key)
+	if msgCount < summaryInterval*2 {
+		return // Not enough messages yet
+	}
+	if !h.convStore.NeedsSummary(key, summaryInterval) {
+		return // Summary already recent enough
 	}
 
-	if len(valid) == 0 {
-		return ""
-	}
+	// Generate summary in background (don't block the response)
+	go func() {
+		recentMsgs := h.convStore.GetRecentMessages(key, 20)
+		if len(recentMsgs) < 6 {
+			return // Not enough messages to summarize
+		}
 
-	// Step 2: Separate the latest message (current query) from history
-	latest := valid[len(valid)-1]
-	history := valid[:len(valid)-1]
-
-	// Step 3: Build history section (sliding window from tail, up to maxQueryRounds)
-	var historyParts []string
-	roundCount := 0
-	for i := len(history) - 1; i >= 0; i-- {
-		entry := history[i]
-		part := entry.role + ": " + entry.content + "\n"
-
-		// Count rounds: each user message starts a new round
-		if entry.role == "user" {
-			roundCount++
-			if roundCount > maxQueryRounds {
-				break
+		// Build a summary request
+		var sb strings.Builder
+		sb.WriteString("请用简洁的中文总结以下对话的要点，不超过500字。只总结关键信息、决定和结论，不需要寒暄和细节：\n\n")
+		for _, msg := range recentMsgs {
+			sb.WriteString(msg.Role)
+			sb.WriteString(": ")
+			// Truncate each message for the summary request
+			content := msg.Content
+			if len(content) > 200 {
+				content = content[:200] + "..."
 			}
+			sb.WriteString(content)
+			sb.WriteString("\n")
 		}
 
-		historyParts = append(historyParts, part)
-	}
-
-	// Reverse to get correct chronological order
-	var historyBuilder strings.Builder
-	historyLen := 0
-	for i := len(historyParts) - 1; i >= 0; i-- {
-		if historyLen + len(historyParts[i]) > maxHistoryChars {
-			continue // skip oldest if too long
+		// Use a fresh conversationId for summary (don't pollute the main conversation)
+		summaryConvID := uuid.New().String()
+		summaryResp, err := client.Chat(context.Background(), sb.String(), "mimo-v2.5-pro", summaryConvID, "0", false, nil)
+		if err != nil {
+			log.Printf("[summary] failed to generate: %v", err)
+			return
 		}
-		historyBuilder.WriteString(historyParts[i])
-		historyLen += len(historyParts[i])
-	}
+		defer summaryResp.Close()
 
-	// Step 4: Assemble final query
-	var result strings.Builder
+		summaryBody, err := io.ReadAll(summaryResp)
+		if err != nil {
+			log.Printf("[summary] failed to read response: %v", err)
+			return
+		}
 
-	if historyBuilder.Len() > 0 {
-		result.WriteString("[以下是对话历史记录，仅供参考，不需要回复这些内容]\n")
-		result.WriteString(historyBuilder.String())
-		result.WriteString("[对话历史结束]\n\n")
-	}
-
-	// Latest message is the actual query (no prefix needed)
-	result.WriteString(latest.content)
-
-	return result.String()
+		summaryText, _ := extractTextFromSSE(string(summaryBody))
+		summaryText = filterThinkingContent(summaryText)
+		if summaryText != "" {
+			// Truncate summary to 1000 chars
+			if len(summaryText) > 1000 {
+				summaryText = summaryText[:1000] + "..."
+			}
+			h.convStore.SetSummary(key, summaryText)
+			log.Printf("[summary] generated for conv %s: %d chars", key[:8], len(summaryText))
+		}
+	}()
 }
 
 // extractFirstOpenAIUserMessage extracts the first user message from OpenAI messages.

@@ -26,10 +26,11 @@ type convState struct {
 	AcctIdx  int    // bound account index in pool (-1 = not bound yet)
 
 	// Extended fields for context recovery
-	Summary      string       // auto-generated summary of the conversation
-	SummaryAt    time.Time    // when the summary was generated
-	MessageCount int          // total number of user+assistant messages
-	RecentMsgs   []MsgEntry   // recent messages (for sliding window recovery)
+	Summary           string     // auto-generated summary of the conversation
+	SummaryAt         time.Time  // when the summary was generated
+	SummaryAtMsgCount int        // message count when summary was last generated
+	MessageCount      int        // total number of user+assistant messages
+	RecentMsgs         []MsgEntry // recent messages (for sliding window recovery)
 }
 
 // MsgEntry represents a single message in the conversation history.
@@ -157,6 +158,7 @@ func (s *Store) SetSummary(key, summary string) {
 	if cs, ok := s.convs[key]; ok {
 		cs.Summary = summary
 		cs.SummaryAt = time.Now()
+		cs.SummaryAtMsgCount = cs.MessageCount
 	}
 }
 
@@ -181,16 +183,16 @@ func (s *Store) GetMessageCount(key string) int {
 }
 
 // NeedsSummary checks if the conversation needs a new summary.
-// Returns true if no summary exists or if message count increased by summaryInterval since last summary.
+// Returns true if enough new messages have accumulated since last summary.
 func (s *Store) NeedsSummary(key string, summaryInterval int) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if cs, ok := s.convs[key]; ok {
 		if cs.Summary == "" {
-			return cs.MessageCount >= summaryInterval
+			return cs.MessageCount >= summaryInterval*2
 		}
-		// Rough check: if we have enough new messages since last summary
-		return cs.MessageCount >= summaryInterval
+		// Need summaryInterval new messages since last summary
+		return cs.MessageCount-cs.SummaryAtMsgCount >= summaryInterval
 	}
 	return false
 }
