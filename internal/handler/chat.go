@@ -162,8 +162,11 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 		log.Printf("[media] found %d media items in request", len(mediaList))
 	}
 
-	firstMsg := extractFirstOpenAIUserMessage(req.Messages)
-	key := convstore.DeriveKey(firstMsg, model)
+	// Derive key from the full messages array (as JSON) to ensure each
+	// unique conversation gets its own ConvID. This prevents different
+	// sessions with the same first message from sharing a conversation.
+	msgsJSON, _ := json.Marshal(req.Messages)
+	key := convstore.DeriveKey(string(msgsJSON), model)
 
 	if len(req.Tools) > 0 {
 		toolPrompt := buildToolPrompt(req.Tools)
@@ -220,11 +223,10 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 		convID, parentID := h.convStore.GetOrCreate(key)
 
 		// ---- Account switch detection & recovery ----
-		// Check BEFORE updating binding so IsAccountSwitched can detect the change.
 		// If this conversation was previously bound to a different account,
-		// inject summary + recent messages as context for the new account.
-		isSwitched := h.convStore.IsAccountSwitched(key, clientIdx)
-		if isSwitched {
+		// we need to inject summary + recent messages as system context
+		// because the new account doesn't have the old conversationId.
+		if h.convStore.IsAccountSwitched(key, clientIdx) {
 			log.Printf("[recovery] account switched for conv %s, injecting context", key[:8])
 			summary, recentMsgs := h.convStore.GetRecoveryContext(key, 6) // last 6 messages
 			recoveryParts := buildRecoveryQuery(summary, recentMsgs)
@@ -236,17 +238,10 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 			parentID = "0"
 		}
 
-		// Update binding AFTER switch detection
-		if clientIdx >= 0 {
-			oldIdx := h.convStore.GetAcctIdx(key)
-			if oldIdx != clientIdx {
-				h.convStore.SetAcctIdx(key, clientIdx)
-				if oldIdx >= 0 {
-					log.Printf("[bind] conversation %s switched from account %d to %d", key[:8], oldIdx, clientIdx)
-				} else {
-					log.Printf("[bind] conversation %s bound to account %d", key[:8], clientIdx)
-				}
-			}
+		// Bind this conversation to the acquired account (if not already bound)
+		if boundIdx < 0 && clientIdx >= 0 {
+			h.convStore.SetAcctIdx(key, clientIdx)
+			log.Printf("[bind] conversation %s bound to account %d", key[:8], clientIdx)
 		}
 
 		// Store current user message for future recovery
@@ -1082,9 +1077,9 @@ func (h *MessagesHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Look up or create conversation using hash of first message as key
-	firstMsg := promptcompat.ExtractFirstUserMessage(req.Messages)
-	key := convstore.DeriveKey(firstMsg, routeResult.Model)
+	// Look up or create conversation using hash of all messages as key
+	msgsJSON, _ := json.Marshal(req.Messages)
+	key := convstore.DeriveKey(string(msgsJSON), routeResult.Model)
 	convID, parentID := h.convStore.GetOrCreate(key)
 
 	// Inject tool definitions into query so MiMo knows what tools are available

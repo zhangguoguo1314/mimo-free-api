@@ -44,10 +44,11 @@ func New() *Store {
 	}
 }
 
-// DeriveKey generates a stable lookup key from the first user message + model.
-// This is used ONLY for local lookup, NOT sent to MiMo.
-func DeriveKey(firstUserMsg, model string) string {
-	h := sha256.Sum256([]byte(firstUserMsg + "|" + model))
+// DeriveKey generates a stable lookup key from the conversation messages + model.
+// Uses the hash of ALL messages to distinguish different sessions.
+// This ensures each unique conversation (different messages array) gets its own ConvID.
+func DeriveKey(messagesJSON string, model string) string {
+	h := sha256.Sum256([]byte(messagesJSON + "|" + model))
 	return fmt.Sprintf("%x", h[:16]) // 32-char hex
 }
 
