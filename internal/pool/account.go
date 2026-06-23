@@ -530,12 +530,13 @@ func (p *Pool) Reload(accounts []config.Account) {
 			// 已存在：检查是否有变更（比较关键字段）
 			if old.account.ServiceToken == acc.ServiceToken &&
 				old.account.UserID == acc.UserID &&
-				old.account.Ph == acc.Ph {
+				old.account.Ph == acc.Ph &&
+				old.account.Active == acc.Active {
 				// 无变更，保留原有 entry（包括 WebClient 和状态）
 				old.account = acc // 更新元数据（Source, AddedAt 等）
 				newClients = append(newClients, old)
 			} else {
-				// 有变更：创建新 entry
+				// 有变更：创建新 entry（重置所有状态）
 				e := &entry{
 					account:    acc,
 					client:     mimo.NewWebClient(acc.ServiceToken, acc.UserID, acc.Ph),

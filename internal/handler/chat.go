@@ -382,12 +382,25 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 			}
 
 			if errMsg != "" {
-				log.Printf("[sse] attempt=%d got error from MiMo: %s, resetting conversation", attempt, errMsg)
-				h.convStore.ResetConversation(key)
+				log.Printf("[sse] attempt=%d got error from MiMo: %s", attempt, errMsg)
+				// Treat MiMo SSE errors like HTTP errors: unbind and retry with new account
+				doRelease()
+				h.handleChatErrorByMsg(errMsg, client)
+				h.convStore.UnbindAcct(key)
+				if attempt == maxRetries {
+					writeError(w, http.StatusBadGateway, fmt.Sprintf("mimo error: %s", errMsg))
+					return
+				}
+				continue
 			}
 
 			doRelease()
 			log.Printf("[retry] empty response from account, will retry")
+			if attempt == maxRetries {
+				writeError(w, http.StatusBadGateway, "empty response from mimo")
+				return
+			}
+			continue
 		}
 	}
 
@@ -836,6 +849,30 @@ func handleChatError(p *pool.Pool, client *mimo.WebClient, err error) {
 		p.MarkCooldown(client)
 		p.MarkUnhealthy(client)
 	}
+}
+
+// handleChatErrorByMsg handles MiMo SSE error messages (e.g. "没有权限操作").
+// These errors come in the SSE payload with HTTP 200 status.
+func (h *ChatHandler) handleChatErrorByMsg(errMsg string, client *mimo.WebClient) {
+	errMsgLower := strings.ToLower(errMsg)
+	// Auth-related errors
+	if strings.Contains(errMsgLower, "权限") || strings.Contains(errMsgLower, "unauthorized") ||
+		strings.Contains(errMsgLower, "forbidden") || strings.Contains(errMsgLower, "登录") {
+		log.Printf("[error] MiMo auth error: %s", errMsg)
+		h.pool.MarkAuthFailed(client)
+		return
+	}
+	// Rate limit errors
+	if strings.Contains(errMsgLower, "频繁") || strings.Contains(errMsgLower, "rate") ||
+		strings.Contains(errMsgLower, "too many") {
+		log.Printf("[error] MiMo rate limit: %s", errMsg)
+		h.pool.MarkRateLimit(client)
+		return
+	}
+	// Default: mark unhealthy
+	log.Printf("[error] MiMo error: %s", errMsg)
+	h.pool.MarkCooldown(client)
+	h.pool.MarkUnhealthy(client)
 }
 
 // streamWebToOpenAIWithThinking forwards MiMo SSE events to OpenAI SSE format in real-time.
