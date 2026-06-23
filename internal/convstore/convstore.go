@@ -44,12 +44,16 @@ func New() *Store {
 	}
 }
 
-// DeriveKey generates a stable lookup key from the conversation messages + model.
-// Uses the hash of ALL messages to distinguish different sessions.
-// This ensures each unique conversation (different messages array) gets its own ConvID.
-func DeriveKey(messagesJSON string, model string) string {
-	h := sha256.Sum256([]byte(messagesJSON + "|" + model))
-	return fmt.Sprintf("%x", h[:16]) // 32-char hex
+// DeriveKey generates a stable lookup key from the first user message + model.
+// If sessionID is provided (via X-Session-ID header), it's included in the hash
+// to ensure different sessions with the same first message get different ConvIDs.
+func DeriveKey(firstUserMsg, model, sessionID string) string {
+	if sessionID != "" {
+		h := sha256.Sum256([]byte(firstUserMsg + "|" + model + "|" + sessionID))
+		return fmt.Sprintf("%x", h[:16])
+	}
+	h := sha256.Sum256([]byte(firstUserMsg + "|" + model))
+	return fmt.Sprintf("%x", h[:16])
 }
 
 // GetOrCreate returns the conversationId and parentId for a conversation.

@@ -138,13 +138,14 @@ func (h *ChatHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.handleWebChat(ctx, w, &req, routeResult.Model, req.Stream)
+	sessionID := r.Header.Get("X-Session-ID")
+	h.handleWebChat(ctx, w, &req, routeResult.Model, req.Stream, sessionID)
 }
 
 // handleWebChat 使用网页端反代 — 真正的流式模式
 // 直接将 MiMo SSE 流转发为 OpenAI SSE 流，不缓冲整个响应
 // 支持空回复自动重试：检测到空内容时切换账号重试，最多重试2次
-func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, req *adapter.OpenAIChatRequest, model string, stream bool) {
+func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, req *adapter.OpenAIChatRequest, model string, stream bool, sessionID string) {
 	// Build query with full conversation history for context continuity.
 	// This ensures context is preserved even when switching accounts.
 	// Format: "user: xxx\nassistant: xxx\nuser: xxx" (latest message is the actual query)
@@ -162,11 +163,11 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 		log.Printf("[media] found %d media items in request", len(mediaList))
 	}
 
-	// Derive key from the full messages array (as JSON) to ensure each
-	// unique conversation gets its own ConvID. This prevents different
-	// sessions with the same first message from sharing a conversation.
-	msgsJSON, _ := json.Marshal(req.Messages)
-	key := convstore.DeriveKey(string(msgsJSON), model)
+	// Derive key from first user message + model.
+	// If client sends X-Session-ID header, it's included to ensure
+	// different sessions with the same first message get different ConvIDs.
+	firstMsg := extractFirstOpenAIUserMessage(req.Messages)
+	key := convstore.DeriveKey(firstMsg, model, sessionID)
 
 	if len(req.Tools) > 0 {
 		toolPrompt := buildToolPrompt(req.Tools)
@@ -1077,9 +1078,10 @@ func (h *MessagesHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Look up or create conversation using hash of all messages as key
-	msgsJSON, _ := json.Marshal(req.Messages)
-	key := convstore.DeriveKey(string(msgsJSON), routeResult.Model)
+	// Look up or create conversation using hash of first message as key
+	firstMsg := promptcompat.ExtractFirstUserMessage(req.Messages)
+	sessionID := r.Header.Get("X-Session-ID")
+	key := convstore.DeriveKey(firstMsg, routeResult.Model, sessionID)
 	convID, parentID := h.convStore.GetOrCreate(key)
 
 	// Inject tool definitions into query so MiMo knows what tools are available
