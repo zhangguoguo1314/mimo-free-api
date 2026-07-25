@@ -319,3 +319,41 @@ func TestParseNestedToolCalls(t *testing.T) {
 
 	t.Logf("nested format OK: name=%s input=%v", call.Name, call.Input)
 }
+
+func TestParseMalformedDSML(t *testing.T) {
+	// Exact format the user reported from MiMo
+	FW := "\uff5c"
+	malformed := FW + "invoke name=\"visit_web\">" + FW + "parameter name=\"url\"><![CDATA[https://www.google.com/search?q=today+events+July+26+2026]]></" + FW + ">" + FW + "parameter name=\"include_image_links\">false</" + FW + "></" + FW + "></" + FW + "DS>"
+
+	t.Logf("Malformed input: %q", malformed)
+
+	// Should detect as tool call syntax
+	if !HasToolCallSyntax(malformed) {
+		t.Fatal("HasToolCallSyntax should detect malformed DSML format")
+	}
+
+	// Should parse
+	calls := ParseToolCallsFromText(malformed)
+	if len(calls) == 0 {
+		t.Fatal("ParseToolCallsFromText should parse malformed DSML format")
+	}
+
+	call := calls[0]
+	if call.Name != "visit_web" {
+		t.Errorf("expected visit_web, got %s", call.Name)
+	}
+	if call.Input["url"] != "https://www.google.com/search?q=today+events+July+26+2026" {
+		t.Errorf("expected url param, got %v", call.Input["url"])
+	}
+	if call.Input["include_image_links"] != "false" {
+		t.Errorf("expected include_image_links=false, got %v", call.Input["include_image_links"])
+	}
+
+	// Should strip
+	stripped := StripToolCallSyntax(malformed)
+	if strings.Contains(stripped, "invoke") {
+		t.Errorf("StripToolCallSyntax should remove invoke tags, got: %q", stripped)
+	}
+
+	t.Logf("✅ Malformed DSML parsed: name=%s input=%v", call.Name, call.Input)
+}

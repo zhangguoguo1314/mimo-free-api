@@ -476,11 +476,75 @@ func parsePercentToolCalls(text string) []ParsedToolCall {
 	return nil
 }
 
+// parseMalformedDSML handles DSML output with missing < and DSML prefix.
+// Example: ｜invoke name="X">｜parameter name="Y">value</｜>
+// This format lacks proper XML structure (no closing </invoke>, truncated </｜>).
+// Uses regex-based extraction instead of XML parsing.
+func parseMalformedDSML(text string) []ParsedToolCall {
+	// Only process if text contains malformed DSML tags (｜invoke/｜parameter without DSML)
+	if !strings.Contains(text, "｜invoke") && !strings.Contains(text, "｜parameter") {
+		return nil
+	}
+	// Also skip if it's already proper DSML (has <｜DSML｜)
+	if strings.Contains(text, "｜DSML｜") {
+		return nil
+	}
+
+	var calls []ParsedToolCall
+
+	// Find all invoke blocks: ｜invoke name="X">... until next ｜invoke or end
+	// Split by ｜invoke to get individual tool calls
+	parts := strings.Split(text, "｜invoke")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		// Part starts with name="X">... or just >
+		// Extract name
+		nameRe := regexp.MustCompile(`name\s*=\s*"([^"]+)"`)
+		nameMatch := nameRe.FindStringSubmatch(part)
+		if nameMatch == nil {
+			continue
+		}
+		name := strings.TrimSpace(nameMatch[1])
+		if name == "" {
+			continue
+		}
+
+		// Extract parameters: ｜parameter name="X">value</｜> or value<
+		input := map[string]any{}
+		paramRe := regexp.MustCompile("｜" + `parameter\s+name\s*=\s*"([^"]+)"[^>]*>(.*?)</` + "｜" + `>`)
+		paramMatches := paramRe.FindAllStringSubmatch(part, -1)
+		for _, pm := range paramMatches {
+			pName := strings.TrimSpace(pm[1])
+			pValue := strings.TrimSpace(pm[2])
+			// Strip CDATA wrapper
+			if strings.HasPrefix(pValue, "<![CDATA[") && strings.HasSuffix(pValue, "]]>") {
+				pValue = pValue[9 : len(pValue)-3]
+			}
+			if pName != "" {
+				input[pName] = pValue
+			}
+		}
+
+		if len(input) > 0 {
+			calls = append(calls, ParsedToolCall{Name: name, Input: input})
+		}
+	}
+
+	return calls
+}
+
 func ParseToolCallsFromText(text string) []ParsedToolCall {
 	if text == "" {
 		return nil
 	}
 	calls := parseDSML(text)
+	if len(calls) > 0 {
+		return calls
+	}
+	calls = parseMalformedDSML(text)
 	if len(calls) > 0 {
 		return calls
 	}
@@ -526,7 +590,10 @@ func HasToolCallSyntax(text string) bool {
 		strings.Contains(lower, "dsml") ||
 		strings.Contains(lower, "function=") ||
 		strings.Contains(lower, "tool_call") ||
-		percentToolRe.MatchString(text)
+		percentToolRe.MatchString(text) ||
+		// Detect malformed DSML output: ｜invoke or ｜parameter without DSML prefix
+		strings.Contains(text, "\uff5cinvoke") ||
+		strings.Contains(text, "\uff5cparameter")
 }
 
 func StripToolCallSyntax(text string) string {
@@ -540,5 +607,12 @@ func StripToolCallSyntax(text string) string {
 	result = regexp.MustCompile(`(?is)<tool_call>[\s\S]*?</tool_call>`).ReplaceAllString(result, "")
 	// Strip MiMo Code native % ToolName args lines
 	result = percentToolRe.ReplaceAllString(result, "")
+	// Strip malformed DSML: lines containing ｜invoke or ｜parameter
+	malformedInvokeRe := regexp.MustCompile(`(?m)^.*\x{ff5c}invoke.*$`)
+	result = malformedInvokeRe.ReplaceAllString(result, "")
+	malformedParamRe := regexp.MustCompile(`(?m)^.*\x{ff5c}parameter.*$`)
+	result = malformedParamRe.ReplaceAllString(result, "")
+	malformedCloseRe := regexp.MustCompile(`(?m)^.*</\x{ff5c}>.*$`)
+	result = malformedCloseRe.ReplaceAllString(result, "")
 	return strings.TrimSpace(result)
 }
