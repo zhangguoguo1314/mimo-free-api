@@ -1021,45 +1021,50 @@ func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model
 				continue
 			}
 
-			// Check for tool calls — buffer only, don't stream raw XML as text
-			if hasTools && toolcall.HasToolCallSyntax(cleaned) {
-				contentBuf.WriteString(cleaned)
-				totalContentLen += len(cleaned)
-				hasContent = true
-				continue
-			}
-
+			// When tools are present, buffer ALL content — don't stream anything
+			// until we know whether it's tool calls or plain text.
+			// This prevents raw tool call XML from leaking to the client.
 			contentBuf.WriteString(cleaned)
-			chunk := adapter.MakeOpenAIStreamChunk(model, cleaned, false)
-			fmt.Fprintf(w, "data: %s\n\n", chunk)
-			flusher.Flush()
 			totalContentLen += len(cleaned)
 			hasContent = true
 		}
 	}
 
-	// Check for tool calls in the full accumulated response
+	// --- End of stream: decide what to send ---
 	finalText := strings.TrimSpace(contentBuf.String())
-	if hasTools && len(finalText) > 0 && toolcall.HasToolCallSyntax(finalText) {
+
+	// If tools were requested, check if the response contains tool calls
+	if hasTools && len(finalText) > 0 {
+		// Try to parse tool calls from the full response
 		calls := toolcall.ParseToolCallsFromText(finalText)
-		log.Printf("[tools] stream: parsed %d calls from text", len(calls))
 		if len(calls) > 0 {
 			toolCalls := toolcall.ConvertToolCallsToOpenAI(calls)
-			log.Printf("[tools] detected %d tool calls in stream, sending tool_call chunks", len(toolCalls))
-			// Send finish chunk with empty content to signal end of text
+			log.Printf("[tools] stream: detected %d tool calls, sending tool_call chunks", len(toolCalls))
+			// Send finish chunk with empty content
 			finishChunk := adapter.MakeOpenAIStreamChunk(model, "", true)
 			fmt.Fprintf(w, "data: %s\n\n", finishChunk)
-			// Send the tool_calls chunk
+			// Send tool_calls chunk
 			toolChunk := adapter.MakeOpenAIStreamToolCallChunk(model, toolCalls, true)
 			fmt.Fprintf(w, "data: %s\n\n", toolChunk)
 			fmt.Fprintf(w, "data: [DONE]\n\n")
 			flusher.Flush()
-			// Strip tool call syntax from stored content so convStore doesn't keep raw XML
 			return hasContent, lastMsgID, toolcall.StripToolCallSyntax(finalText), usage
 		}
+		// No tool calls detected — send buffered text as normal content
+		log.Printf("[tools] stream: no tool calls detected, sending as text (len=%d)", len(finalText))
+		if finalText != "" {
+			chunk := adapter.MakeOpenAIStreamChunk(model, finalText, false)
+			fmt.Fprintf(w, "data: %s\n\n", chunk)
+			flusher.Flush()
+		}
+	} else if finalText != "" {
+		// No tools — send buffered text
+		chunk := adapter.MakeOpenAIStreamChunk(model, finalText, false)
+		fmt.Fprintf(w, "data: %s\n\n", chunk)
+		flusher.Flush()
 	}
 
-	// Send finish chunk (normal text response)
+	// Send finish chunk
 	finishChunk := adapter.MakeOpenAIStreamChunk(model, "", true)
 	fmt.Fprintf(w, "data: %s\n\n", finishChunk)
 	fmt.Fprintf(w, "data: [DONE]\n\n")
