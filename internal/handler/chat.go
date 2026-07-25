@@ -170,7 +170,7 @@ func (h *ChatHandler) handleWebChat(ctx context.Context, w http.ResponseWriter, 
 	key := convstore.DeriveKey(firstMsg, model, sessionID)
 
 	if len(req.Tools) > 0 {
-		toolPrompt := buildToolPrompt(req.Tools)
+		toolPrompt := toolcall.BuildToolPrompt(req.Tools)
 		query = toolPrompt + "\n\n" + query
 	}
 
@@ -1021,12 +1021,9 @@ func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model
 				continue
 			}
 
-			// Check for tool calls
+			// Check for tool calls — buffer only, don't stream raw XML as text
 			if hasTools && toolcall.HasToolCallSyntax(cleaned) {
 				contentBuf.WriteString(cleaned)
-				chunk := adapter.MakeOpenAIStreamChunk(model, cleaned, false)
-				fmt.Fprintf(w, "data: %s\n\n", chunk)
-				flusher.Flush()
 				totalContentLen += len(cleaned)
 				hasContent = true
 				continue
@@ -1041,7 +1038,28 @@ func (h *ChatHandler) streamWebToOpenAIWithThinking(w http.ResponseWriter, model
 		}
 	}
 
-	// Send finish chunk
+	// Check for tool calls in the full accumulated response
+	finalText := strings.TrimSpace(contentBuf.String())
+	if hasTools && len(finalText) > 0 && toolcall.HasToolCallSyntax(finalText) {
+		calls := toolcall.ParseToolCallsFromText(finalText)
+		log.Printf("[tools] stream: parsed %d calls from text", len(calls))
+		if len(calls) > 0 {
+			toolCalls := toolcall.ConvertToolCallsToOpenAI(calls)
+			log.Printf("[tools] detected %d tool calls in stream, sending tool_call chunks", len(toolCalls))
+			// Send finish chunk with empty content to signal end of text
+			finishChunk := adapter.MakeOpenAIStreamChunk(model, "", true)
+			fmt.Fprintf(w, "data: %s\n\n", finishChunk)
+			// Send the tool_calls chunk
+			toolChunk := adapter.MakeOpenAIStreamToolCallChunk(model, toolCalls, true)
+			fmt.Fprintf(w, "data: %s\n\n", toolChunk)
+			fmt.Fprintf(w, "data: [DONE]\n\n")
+			flusher.Flush()
+			// Strip tool call syntax from stored content so convStore doesn't keep raw XML
+			return hasContent, lastMsgID, toolcall.StripToolCallSyntax(finalText), usage
+		}
+	}
+
+	// Send finish chunk (normal text response)
 	finishChunk := adapter.MakeOpenAIStreamChunk(model, "", true)
 	fmt.Fprintf(w, "data: %s\n\n", finishChunk)
 	fmt.Fprintf(w, "data: [DONE]\n\n")
@@ -1124,7 +1142,7 @@ func (h *MessagesHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	// Inject tool definitions into query so MiMo knows what tools are available
 	if hasTools {
 		openaiTools := adapter.ConvertAnthropicToolsToOpenAI(req.Tools)
-		toolPrompt := buildToolPrompt(openaiTools)
+		toolPrompt := toolcall.BuildToolPrompt(openaiTools)
 		query = toolPrompt + "\n\n" + query
 		log.Printf("[tools] stateful Anthropic prompt with %d tools, query len=%d, key=%s, convID=%s, parentID=%s",
 			len(req.Tools), len(query), key[:8], convID[:8], parentID[:min(len(parentID), 8)])
