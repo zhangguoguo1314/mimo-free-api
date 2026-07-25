@@ -357,3 +357,29 @@ func TestParseMalformedDSML(t *testing.T) {
 
 	t.Logf("✅ Malformed DSML parsed: name=%s input=%v", call.Name, call.Input)
 }
+
+func TestParseSeverelyMalformed(t *testing.T) {
+	// Exact format the user reported: visit_web">url"><![CDATA[...]]>
+	input := `visit_web">url"><![CDATA[https://news.baidu.com/]]>`
+
+	t.Logf("Input: %q", input)
+
+	if !HasToolCallSyntax(input) {
+		t.Fatal("HasToolCallSyntax should detect severely malformed format")
+	}
+
+	calls := ParseToolCallsFromText(input)
+	if len(calls) == 0 {
+		t.Fatal("ParseToolCallsFromText should parse severely malformed format")
+	}
+
+	call := calls[0]
+	if call.Name != "visit_web" {
+		t.Errorf("expected visit_web, got %s", call.Name)
+	}
+	if call.Input["url"] != "https://news.baidu.com/" {
+		t.Errorf("expected url=https://news.baidu.com/, got %v", call.Input["url"])
+	}
+
+	t.Logf("✅ Severely malformed parsed: name=%s input=%v", call.Name, call.Input)
+}

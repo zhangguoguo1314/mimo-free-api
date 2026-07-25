@@ -536,6 +536,73 @@ func parseMalformedDSML(text string) []ParsedToolCall {
 	return calls
 }
 
+// parseSeverelyMalformed handles the most broken DSML output where even < and ｜ are missing.
+// Example from model: visit_web">url"><![CDATA[https://news.baidu.com/]]>
+func parseSeverelyMalformed(text string) []ParsedToolCall {
+	// Must contain "> which indicates tag-like structure, and no < or ｜
+	if !strings.Contains(text, `">`) {
+		return nil
+	}
+	// Skip if text has proper XML/DSML structure (has opening tags like <invoke or <｜)
+	hasOpeningTag := strings.Contains(text, "<invoke") || strings.Contains(text, "<function") ||
+		strings.Contains(text, "<tool_call") || strings.Contains(text, "\uff5cDSML") ||
+		strings.Contains(text, "\uff5cinvoke")
+	if hasOpeningTag {
+		return nil
+	}
+
+	var calls []ParsedToolCall
+
+	// Extract tool name: everything before first ">
+	firstQuote := strings.Index(text, `">`)
+	if firstQuote <= 0 {
+		return nil
+	}
+	toolName := strings.TrimSpace(text[:firstQuote])
+	if toolName == "" || strings.Contains(toolName, " ") {
+		return nil
+	}
+
+	// Find all parameter pairs: param_name">value
+	// Values may contain CDATA and end at next param or end of string
+	paramRe := regexp.MustCompile(`(\w+)">(.*)`)
+	remaining := text[firstQuote:]
+	input := map[string]any{}
+	for {
+		m := paramRe.FindStringSubmatch(remaining)
+		if m == nil {
+			break
+		}
+		pName := strings.TrimSpace(m[1])
+		pValue := strings.TrimSpace(m[2])
+		if pName == toolName {
+			// Skip, this is part of the tool name pattern
+			remaining = remaining[len(m[0]):]
+			continue
+		}
+		// Value runs until the next param_name"> or end of string
+		nextParam := regexp.MustCompile(`\w+">`)
+		nextIdx := nextParam.FindStringIndex(pValue)
+		if nextIdx != nil {
+			pValue = pValue[:nextIdx[0]]
+		}
+		pValue = strings.TrimSpace(pValue)
+		// Strip CDATA
+		if strings.HasPrefix(pValue, "<![CDATA[") && strings.HasSuffix(pValue, "]]>") {
+			pValue = pValue[9 : len(pValue)-3]
+		}
+		if pName != "" {
+			input[pName] = pValue
+		}
+		break // Only one param for severely malformed
+	}
+
+	if len(input) > 0 {
+		calls = append(calls, ParsedToolCall{Name: toolName, Input: input})
+	}
+	return calls
+}
+
 func ParseToolCallsFromText(text string) []ParsedToolCall {
 	if text == "" {
 		return nil
@@ -560,7 +627,11 @@ func ParseToolCallsFromText(text string) []ParsedToolCall {
 	if len(calls) > 0 {
 		return calls
 	}
-	return parsePercentToolCalls(text)
+	calls = parsePercentToolCalls(text)
+	if len(calls) > 0 {
+		return calls
+	}
+	return parseSeverelyMalformed(text)
 }
 
 func ConvertToolCallsToOpenAI(calls []ParsedToolCall) []adapter.OpenAIToolCall {
@@ -581,19 +652,29 @@ func ConvertToolCallsToOpenAI(calls []ParsedToolCall) []adapter.OpenAIToolCall {
 
 var percentToolRe = regexp.MustCompile(`(?m)^%\s+\w+\s+.*$`)
 
+var toolNamePatternRe = regexp.MustCompile(`\w+">\w+">`)
+
 func HasToolCallSyntax(text string) bool {
 	if text == "" {
 		return false
 	}
 	lower := strings.ToLower(text)
-	return strings.Contains(lower, "tool_calls") ||
+	if strings.Contains(lower, "tool_calls") ||
 		strings.Contains(lower, "dsml") ||
 		strings.Contains(lower, "function=") ||
 		strings.Contains(lower, "tool_call") ||
-		percentToolRe.MatchString(text) ||
-		// Detect malformed DSML output: ｜invoke or ｜parameter without DSML prefix
-		strings.Contains(text, "\uff5cinvoke") ||
-		strings.Contains(text, "\uff5cparameter")
+		percentToolRe.MatchString(text) {
+		return true
+	}
+	// Detect malformed DSML: ｜invoke or ｜parameter
+	if strings.Contains(text, "\uff5cinvoke") || strings.Contains(text, "\uff5cparameter") {
+		return true
+	}
+	// Detect severely malformed: tool_name">param"> (no < or ｜)
+	if toolNamePatternRe.MatchString(text) {
+		return true
+	}
+	return false
 }
 
 func StripToolCallSyntax(text string) string {
